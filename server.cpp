@@ -13,8 +13,13 @@
 #include <iostream>
 #include <vector>
 #include <thread>
+#include <map>
+#include <string>
 
 using namespace std;
+
+vector<int> clients;
+map<string, int> users;
 
 void thread_reader(int socketID){
   char buffer[256];
@@ -24,6 +29,35 @@ void thread_reader(int socketID){
     n = recv(socketID, buffer, 255, 0);
     if (n < 0)
       perror("ERROR reading from socket");
+    if (buffer == "END"){
+      shutdown(socketID, SHUT_RDWR);
+      close(socketID);
+      break;
+    }
+    string sender, receiver, message;
+    //type of message: sender,receiver,message
+    int i = 0;
+    for (; buffer[i] != ','; i++)
+      sender += buffer[i];
+    i++;
+    for (; buffer[i] != ','; i++)
+      receiver += buffer[i];
+    i++;
+    for (; buffer[i] != '\0'; i++)
+      message += buffer[i];
+    if (users.find(receiver) != users.end()){
+      int receiverID = users[receiver];
+      n = send(receiverID, message.c_str(), strlen(message.c_str()), 0);
+      if (n < 0)
+        perror("ERROR writing to socket");
+      printf("Client sent: [%s]\n", buffer);
+    }
+    else{
+      n = send(socketID, "User not found", strlen("User not found"), 0);
+      if (n < 0)
+        perror("ERROR writing to socket");
+      printf("Client sent: [%s]\n", buffer);
+    }
     printf("Client replay: [%s]\n", buffer);
   }
 }
@@ -47,9 +81,6 @@ int main(void)
   struct sockaddr_in cli_addr;
   int client;
   int SocketFD;
-  char buffer[256];
-  char buffer2[256];
-  int n;
 
   if ((SocketFD = socket(AF_INET, SOCK_STREAM, 0)) == -1){
     perror("Socket");
@@ -81,25 +112,16 @@ int main(void)
     client = sizeof(cli_addr);
     int ConnectFD = accept(SocketFD, (struct sockaddr *)&cli_addr, (socklen_t *)&client);
 
-    bzero(buffer, 256);
-    bzero(buffer2, 256);
-
-    while (1)
-    {
-      n = recv(ConnectFD, buffer, 255, 0);
-      if (n < 0)
-        perror("ERROR reading from socket");
-
-      strcat(buffer2, "MSG:[");
-      strcat(buffer2, buffer);
-      strcat(buffer2, "]");
-      printf("Responding:<%s>\n", buffer2);
-      printf("Here is the message: [%s]\n", buffer);
-
-      n = send(ConnectFD, "I got your message", 18, 0);
+    if (ConnectFD < 0){
+      perror("Accept error");
+      exit(1);
     }
 
-    close(ConnectFD);
+    clients.push_back(ConnectFD);
+    thread(thread_reader, ConnectFD).detach();
+    thread(thread_writer, ConnectFD).detach();
+
+    printf("Client connected: %s\n", inet_ntoa(cli_addr.sin_addr));
   }
 
   close(SocketFD);
