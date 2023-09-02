@@ -15,45 +15,41 @@
 #include <thread>
 #include <map>
 #include <string>
+#include <sstream>
 
 using namespace std;
 
-vector<int> clients;
-map<string, int> users;
+map<string, int> clientNames; //clientNames[clientName] = SocketFD
 
-void thread_reader(int socketID){
+void thread_reader(int ConnectFD){
   char buffer[256];
   int n;
   while (1){
     bzero(buffer, 256);
-    n = recv(socketID, buffer, 255, 0);
+    n = recv(ConnectFD, buffer, 255, 0);
     if (n < 0)
       perror("ERROR reading from socket");
     if (buffer == "END"){
-      shutdown(socketID, SHUT_RDWR);
-      close(socketID);
+      shutdown(ConnectFD, SHUT_RDWR);
+      close(ConnectFD);
       break;
     }
+    stringstream ss(buffer);
     string sender, receiver, message;
     //type of message: sender,receiver,message
-    int i = 0;
-    for (; buffer[i] != ','; i++)
-      sender += buffer[i];
-    i++;
-    for (; buffer[i] != ','; i++)
-      receiver += buffer[i];
-    i++;
-    for (; buffer[i] != '\0'; i++)
-      message += buffer[i];
-    if (users.find(receiver) != users.end()){
-      int receiverID = users[receiver];
+    getline(ss, sender, ',');
+    getline(ss, receiver, ',');
+    getline(ss, message);
+
+    if (clientNames.find(receiver) != clientNames.end()){
+      int receiverID = clientNames[receiver];
       n = send(receiverID, message.c_str(), strlen(message.c_str()), 0);
       if (n < 0)
         perror("ERROR writing to socket");
       printf("Client sent: [%s]\n", buffer);
     }
     else{
-      n = send(socketID, "User not found", strlen("User not found"), 0);
+      n = send(ConnectFD, "User not online", strlen("User not online"), 0);
       if (n < 0)
         perror("ERROR writing to socket");
       printf("Client sent: [%s]\n", buffer);
@@ -73,7 +69,6 @@ int main(void)
     perror("Socket");
     exit(1);
   }
-
   if (setsockopt(SocketFD, SOL_SOCKET, SO_REUSEADDR, "1", sizeof(int)) == -1){
     perror("Setsockopt");
     exit(1);
@@ -89,13 +84,12 @@ int main(void)
     perror("Unable to bind");
     exit(1);
   }
-
   if (listen(SocketFD, 5) == -1){
     perror("Listen error");
     exit(1);
   }
 
-  for (;;){
+  while (1){
     client = sizeof(cli_addr);
     int ConnectFD = accept(SocketFD, (struct sockaddr *)&cli_addr, (socklen_t *)&client);
 
@@ -104,11 +98,17 @@ int main(void)
       exit(1);
     }
 
-    
-    clients.push_back(ConnectFD);
+    // Enviar mensaje al cliente pidiendo su nombre
+    char buffer[256];
+    bzero(buffer, 256);
+
+
+
+    string clientIP= inet_ntoa(cli_addr.sin_addr);
+    clientNames[clientIP] = ConnectFD;
     thread(thread_reader, ConnectFD).detach();
     
-    printf("Client connected: %s\n", inet_ntoa(cli_addr.sin_addr));
+    printf("Client connected: %s\n", clientIP.c_str());
   }
 
   close(SocketFD);

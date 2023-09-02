@@ -27,17 +27,8 @@ void thread_reader(int socketID){
   }
 }
 
-void thread_writer(int socketID){
-  int n;
-  char buffer[256];
-  while (1){
-    bzero(buffer, 256);
-    fgets(buffer, 255, stdin);
-    n = send(socketID, buffer, strlen(buffer), 0);
-    if (n < 0)
-      perror("ERROR writing to socket");
-    printf("Client sent: [%s]\n", buffer);
-  }
+void resend(){
+   
 }
 
 int main(int argc, char *argv[]){
