@@ -62,19 +62,6 @@ void thread_reader(int socketID){
   }
 }
 
-void thread_writer(int socketID){
-  int n;
-  char buffer[256];
-  while (1){
-    bzero(buffer, 256);
-    fgets(buffer, 255, stdin);
-    n = send(socketID, buffer, strlen(buffer), 0);
-    if (n < 0)
-      perror("ERROR writing to socket");
-    printf("Client sent: [%s]\n", buffer);
-  }
-}
-
 int main(void)
 {
   struct sockaddr_in stSockAddr;
@@ -117,10 +104,10 @@ int main(void)
       exit(1);
     }
 
+    
     clients.push_back(ConnectFD);
     thread(thread_reader, ConnectFD).detach();
-    thread(thread_writer, ConnectFD).detach();
-
+    
     printf("Client connected: %s\n", inet_ntoa(cli_addr.sin_addr));
   }
 
