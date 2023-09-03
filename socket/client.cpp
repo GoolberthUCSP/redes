@@ -4,34 +4,47 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <string.h>
 #include <unistd.h>
 
 #include <iostream>
-#include <vector>
 #include <thread>
 
 using namespace std;
 
-void thread_reader(int socketID){
+void thread_reader(int SocketFD){
   char buffer[256];
   int n;
   while (1){
     bzero(buffer, 256);
-    n = recv(socketID, buffer, 255, 0);
+    n = recv(SocketFD, buffer, 255, 0);
+    
     if (n < 0)
       perror("ERROR reading from socket");
+
+    if (n == 0){
+      printf("Client disconnected\n");
+      close(SocketFD);
+      exit(EXIT_SUCCESS);
+    }
+
     printf("Server replay: [%s]\n", buffer);
   }
 }
 
-void resend(){
-   
-}
-
 int main(int argc, char *argv[]){
+  if (argc != 2){
+    printf("Bad number of arguments\n");
+    exit(EXIT_FAILURE);
+  }
+  int Port = atoi(argv[1]);
+  if (Port < 1024 || Port > 65535){
+    printf("Bad port number\n");
+    exit(EXIT_FAILURE);
+  }
+
   struct sockaddr_in stSockAddr;
   int Res;
   int SocketFD = socket(AF_INET, SOCK_STREAM, 0); // IPPROTO_TCP
@@ -46,8 +59,8 @@ int main(int argc, char *argv[]){
   memset(&stSockAddr, 0, sizeof(struct sockaddr_in));
 
   stSockAddr.sin_family = AF_INET;
-  stSockAddr.sin_port = htons(1100);
-  Res = inet_pton(AF_INET, "192.168.1.33", &stSockAddr.sin_addr);
+  stSockAddr.sin_port = htons(Port);
+  Res = inet_pton(AF_INET, "127.0.0.1", &stSockAddr.sin_addr); //192.168.1.33
 
   if (0 > Res){
     perror("error: first parameter is not a valid address family");
@@ -67,19 +80,30 @@ int main(int argc, char *argv[]){
     close(SocketFD);
     exit(EXIT_FAILURE);
   }
-  printf("Sending:<%s>\n", argv[1]);
-  n = send(SocketFD, argv[1], strlen(argv[1]), 0);
+  else
+    printf("Connected to server\n");
 
   bzero(buffer, 256);
-  n = recv(SocketFD, buffer, 255, 0);
+
+  // Message getting username 
+  printf("Enter your username: ");
+  fgets(buffer, 255, stdin);
+  n = send(SocketFD, buffer, strlen(buffer), 0);
+
   if (n < 0)
-    perror("ERROR reading from socket");
-  printf("Server replay: [%s]\n", buffer);
+    perror("ERROR writing to socket");
+  
+  thread(thread_reader, SocketFD).detach();
 
-  sleep(1000);
+  // Infinite loop waiting for messages from keyboard
+  while(1){ 
+    bzero(buffer, 256);
+    fgets(buffer, 255, stdin);
 
-  shutdown(SocketFD, SHUT_RDWR);
-
-  close(SocketFD);
+    n = send(SocketFD, buffer, strlen(buffer), 0);
+    if (n < 0)
+      perror("ERROR writing to socket");
+      
+  }
   return 0;
 }
