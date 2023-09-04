@@ -4,6 +4,9 @@
 
 ## socket
 
+Creación de un chat, en el cual el cliente podrá enviar mensajes a un cliente conectado. Al principio el cliente se identifica, luego puede enviar mensajes en formato: *destinatario,mensaje*.
+Para cerrar sesión el cliente envía el siguiente mensaje: *END*.
+
 - Compilación
 ```terminal
 make
