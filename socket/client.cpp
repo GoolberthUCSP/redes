@@ -25,12 +25,12 @@ void thread_reader(int SocketFD){
       perror("ERROR reading from socket");
 
     if (n == 0){
-      printf("Client disconnected\n");
+      printf("Disconnected from server\n");
       close(SocketFD);
       exit(EXIT_SUCCESS);
     }
 
-    printf("Server replay: [%s]\n", buffer);
+    printf("%s\n", buffer);
   }
 }
 
@@ -99,8 +99,9 @@ int main(int argc, char *argv[]){
   while(1){ 
     bzero(buffer, 256);
     fgets(buffer, 255, stdin);
+    buffer[strcspn(buffer, "\n")] = '\0';
 
-    n = send(SocketFD, buffer, strlen(buffer), 0);
+    n = send(SocketFD, buffer, strlen(buffer) + 1, 0);
     if (n < 0)
       perror("ERROR writing to socket");
       

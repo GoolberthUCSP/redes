@@ -28,7 +28,6 @@ void thread_reader(int ConnectFD, string sender){
     n = recv(ConnectFD, buffer, 255, 0);
     if (n < 0)
       perror("ERROR reading from socket");
-    buffer[n-1] = '\0';
 
     //kill process if message is "END"
     if (strcmp(buffer, "END") == 0){
@@ -44,8 +43,9 @@ void thread_reader(int ConnectFD, string sender){
     string receiver, message;
     getline(ss, receiver, ',');
     getline(ss, message);
-    message = message.substr(0, message.size()-1);
+    //message = message.substr(0, message.size()-1);
 
+    //if receiver is online
     if (clientNames.find(receiver) != clientNames.end()){
       int receiverID = clientNames[receiver];
       message= sender + ": " + message;
@@ -57,13 +57,23 @@ void thread_reader(int ConnectFD, string sender){
       printf("Message replay to %s: [%s]\n", receiver.c_str(), message.c_str());
     }
     else{
-      printf("Client does not exists: [%s]\n", receiver.c_str());
-      n = send(ConnectFD, "User not online", strlen("User not online"), 0);
+      printf("Message not sent, receiver no exist: [%s]\n", receiver.c_str());
+      
+      receiver += " not online!";
+      n = send(ConnectFD, receiver.c_str(), strlen(receiver.c_str()), 0);
 
       if (n < 0)
         perror("ERROR writing to socket");
     }
   }
+}
+
+void kill(int SocketFD){
+  char tmp;
+  scanf("%c", &tmp);
+  shutdown(SocketFD, SHUT_RDWR);
+  close(SocketFD);
+  exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char *argv[]){
@@ -107,6 +117,7 @@ int main(int argc, char *argv[]){
     exit(1);
   }
 
+  //thread(kill, SocketFD).detach();
   client = sizeof(cli_addr);
 
   while (1){
@@ -115,12 +126,8 @@ int main(int argc, char *argv[]){
     if (ConnectFD < 0){
       perror("Accept error");
       exit(1);
+      //kill(SocketFD); //Not sure if this is the right way
     }
-
-    //Get IP from ConnectFD
-    char address[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &cli_addr.sin_addr, address, INET_ADDRSTRLEN);
-    printf("Client connected with IP: %s\n", address);
 
     bzero(buffer, 256);
 
@@ -133,9 +140,7 @@ int main(int argc, char *argv[]){
     clientNames[buffer] = ConnectFD;
     thread(thread_reader, ConnectFD, string(buffer)).detach();
     
-    printf("Client connected with username: %s\n", buffer);
+    printf("Client connected: [%s]\n", buffer);
   }
-
-  close(SocketFD);
   return 0;
 }
