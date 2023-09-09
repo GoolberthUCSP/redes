@@ -19,3 +19,14 @@ make
 ./client <Port>
 ```
 Servidor y clientes deben usar el mismo puerto para la comunicación, por defecto el IP del servidor es el *localhost* al cual se conectarán los clientes.
+
+## socketv2
+
+El mismo chat del anterior *socket*, pero usando un protocolo para el envío y recibo de mensajes por parte de clientes y servidor. La compilación y la ejecución es igual al la versión anterior.
+
+- Las reglas para el ingreso de datos por el teclado es la siguiente:
+    + Para cambiar el username se debe escribir: *N,new_username*.
+    + Para enviar un mensaje a una persona se debe escribir: *M,receiver,message*, en el cual *receiver* es el destinatario.
+    + Para enviar un mensaje a todos se debe escribir: *W,message*.
+    + Para pedir la lista de clientes conectados se debe escribir: *L*.
+    + Por último, para desconectarse del servidor se debe escribir: *Q*.
