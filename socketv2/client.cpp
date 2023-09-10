@@ -43,6 +43,23 @@ void thread_reader(int SocketFD){
   }
 }
 
+bool validate_nickname(string nickname, char buff[SIZE]){
+  string size, nick;
+  vector<string> nicknames;
+  stringstream ss;
+  ss << buff;
+  getline(ss, size, ',');
+  for (int i = 0; i < stoi(size); i++){
+    getline(ss, nick, ',');
+    nicknames.push_back(nick);
+  }
+  for (auto it: nicknames){
+    if (it == nickname)
+      return false;
+  }
+  return true;
+}
+
 int main(int argc, char *argv[]){
   if (argc != 2){
     printf("Bad number of arguments\n");
@@ -95,13 +112,20 @@ int main(int argc, char *argv[]){
   bzero(buffer, SIZE);
   
   // Get existent usernames to validate nickname
-  //n = recv(SocketFD, buffer, SIZE-1, 0);
-  //TODO: Implement
-
-  // Message getting username 
-  printf("Enter your username: ");
-  fgets(buffer, SIZE-1, stdin);
-  n = send(SocketFD, buffer, strlen(buffer), 0);
+  n = recv(SocketFD, buffer, SIZE-1, 0);
+  if (n < 0)
+    perror("ERROR reading from socket");
+  
+  // Getting a nickname no repeated
+  char nickname[50];
+  do{
+    bzero(nickname, 50); 
+    printf("Enter an username no repeated: ");
+    fgets(nickname, 49, stdin);
+    nickname[strcspn(nickname, "\n")] = '\0';
+  }while(!validate_nickname(string(nickname), buffer));
+  
+  n = send(SocketFD, nickname, strlen(nickname), 0);
 
   if (n < 0)
     perror("ERROR writing to socket");
@@ -172,7 +196,6 @@ string encoding(char buff[SIZE]){
   else { //Error in message
     output << "ERROR";
   }
-  cout << output.str() << endl;
   return output.str();
 }
 

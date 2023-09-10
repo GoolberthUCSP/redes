@@ -100,13 +100,23 @@ int main(int argc, char *argv[]){
       exit(1);
     }
 
+    //Send existent nicknames to verification from client
+    string existent_nicknames= to_string(clientNames.size())+",";
+    for (auto clientName : clientNames){
+      existent_nicknames += clientName.first + ",";
+    }
+    existent_nicknames = existent_nicknames.substr(0, existent_nicknames.size()-1);
+    int n = send(ConnectFD, existent_nicknames.c_str(), strlen(existent_nicknames.c_str()), 0);
+    if (n < 0)
+      perror("ERROR writing to socket");
+
     bzero(buffer, SIZE);
 
     //Receive username from client
-    int n= recv(ConnectFD, buffer, SIZE-1, 0);
+    n= recv(ConnectFD, buffer, SIZE-1, 0);
     if (n < 0)
       perror("ERROR reading from socket");
-    buffer[n-1] = '\0';
+    buffer[n] = '\0';
     
     clientNames[buffer] = ConnectFD;
     thread(thread_reader, ConnectFD, string(buffer)).detach();
@@ -138,6 +148,13 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     ss.read(size.data(), size.size());
     string new_nickname(stoi(size), '0');
     ss.read(new_nickname.data(), new_nickname.size());
+
+    // Validate new nickname
+    if (clientNames.find(new_nickname) != clientNames.end()){
+      send_notification(nickname, "Nickname already in use");
+      return;
+    }
+
     clientNames.erase(nickname);
     clientNames[new_nickname] = ConnectFD;
     printf("Client nickname changed: [%s->%s]\n", nickname.c_str(), new_nickname.c_str());
