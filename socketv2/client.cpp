@@ -33,7 +33,7 @@ void thread_reader(int SocketFD){
     if (n < 0)
       perror("ERROR reading from socket");
 
-    if (n == 0){
+    if (n == 0){ //Disconnected
       printf("Disconnected from server\n");
       close(SocketFD);
       exit(EXIT_SUCCESS);
@@ -93,6 +93,10 @@ int main(int argc, char *argv[]){
     printf("Connected to server\n");
 
   bzero(buffer, SIZE);
+  
+  // Get existent usernames to validate nickname
+  //n = recv(SocketFD, buffer, SIZE-1, 0);
+  //TODO: Implement
 
   // Message getting username 
   printf("Enter your username: ");
@@ -111,11 +115,10 @@ int main(int argc, char *argv[]){
     buffer[strcspn(buffer, "\n")] = '\0';
 
     string packet= encoding(buffer);
-    if (packet == "E00"){ //Error message
+    if (packet == "ERROR"){ //Error message
       printf("Error in your message\n");
       continue;
     }
-    
     n = send(SocketFD, packet.c_str(), strlen(packet.c_str()), 0);
     if (n < 0)
       perror("ERROR writing to socket");
@@ -135,10 +138,11 @@ string encoding(char buff[SIZE]){
   type= tolower(type);
   if (type == 'n') { //Change name
     // N,nickname
-    string name(ss.str());
+    string name;
+    getline(ss, name);
     ostringstream size;
     size << setw(2) << setfill('0') << name.size();
-    output << toupper(type) << size.str() << name;
+    output << 'N' << size.str() << name;
   } 
   else if (type == 'm') { //Message to one
     // M,receiver,message
@@ -148,26 +152,27 @@ string encoding(char buff[SIZE]){
     ostringstream size_rcv, size_msg;
     size_rcv << setw(2) << setfill('0') << rcv.size();
     size_msg << setw(3) << setfill('0') << message.size();
-    output << toupper(type) << size_rcv.str() << rcv << size_msg.str() << message;
+    output << 'M' << size_rcv.str() << rcv << size_msg.str() << message;
   } 
   else if (type == 'w') { //Message to all
     // W,message
     string message(ss.str());
     ostringstream size;
     size << setw(3) << setfill('0') << message.size();
-    output << toupper(type) << size.str() << message;
+    output << 'W' << size.str() << message;
   }
   else if (type == 'l') { //List all online
     // L || l
-    output << toupper(type) << "00";
+    output << 'L' << "00";
   } 
   else if (type == 'q') { //End connection
     // Q || q
-    output << toupper(type) << "00";
+    output << 'Q' << "00";
   } 
   else { //Error in message
-    output << "E00";
+    output << "ERROR";
   }
+  cout << output.str() << endl;
   return output.str();
 }
 

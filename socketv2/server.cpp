@@ -21,28 +21,32 @@
 
 using namespace std;
 
-void processing(int ConnectFD, string &sender, char buff[SIZE]);
+void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill);
+void kill_connection(string &nickname);
+void send_notification(string &nickname, string notification);
 
 map<string, int> clientNames; //clientNames[clientName] = SocketFD
 
 void thread_reader(int ConnectFD, string sender){
+  string nickname(sender);
+  bool kill = false;
   char buffer[SIZE];
   int n;
-  while (1){
+  while (!kill){
     bzero(buffer, SIZE);
     n = recv(ConnectFD, buffer, SIZE-1, 0);
     if (n < 0)
       perror("ERROR reading from socket");
 
-    processing(ConnectFD, sender, buffer);
+    processing(ConnectFD, nickname, buffer, kill);
   }
 }
 
-void killConnection(int ConnectFD, string &sender){
-  shutdown(ConnectFD, SHUT_RDWR);
-  close(ConnectFD);
-  clientNames.erase(sender);
-  printf("Client disconnected: [%s]\n", sender.c_str());
+void kill_connection(string &nickname){
+  shutdown(clientNames[nickname], SHUT_RDWR);
+  close(clientNames[nickname]);
+  clientNames.erase(nickname);
+  printf("Client disconnected: [%s]\n", nickname.c_str());
 }
 
 int main(int argc, char *argv[]){
@@ -112,43 +116,58 @@ int main(int argc, char *argv[]){
   return 0;
 }
 
-void processing(int ConnectFD, string &sender, char buff[SIZE]){
+void send_notification(string &nickname, string notification){
+  ostringstream os, size_notification;
+  size_notification << setw(2) << setfill('0') << notification.size();
+  os << 'N' << size_notification.str() << notification;
+  int n = send(clientNames[nickname], os.str().c_str(), strlen(os.str().c_str()), 0);
+  if (n < 0)
+    perror("ERROR writing to socket");
+  printf("Notification to %s: [%s]\n", nickname.c_str(), notification.c_str());
+}
+
+void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
   stringstream ss(buff);
   ostringstream os;
-
   char type;
-  // type: N: change name, M: message to one, W: message to all, L: list of online clients, Q: quit
   ss >> type;
+
   if (type == 'N'){ //change nickname
     // N00nickname
     string size(2, '0');
     ss.read(size.data(), size.size());
-    string nickname(stoi(size), '0');
-    ss.read(nickname.data(), nickname.size());
-    clientNames.erase(sender);
-    clientNames[nickname] = ConnectFD;
-    printf("Client nickname changed: [%s->%s]\n", sender.c_str(), nickname.c_str());
-    sender = nickname;
-    string notification= "Changed nickname to " + nickname;
-    os << 'N' << notification.size() << notification;
-    int n = send(ConnectFD, os.str().c_str(), strlen(os.str().c_str()), 0);
-    if (n < 0)
-      perror("ERROR writing to socket");
-    printf("Notification to %s: [%s]\n", sender.c_str(), notification.c_str());
+    string new_nickname(stoi(size), '0');
+    ss.read(new_nickname.data(), new_nickname.size());
+    clientNames.erase(nickname);
+    clientNames[new_nickname] = ConnectFD;
+    printf("Client nickname changed: [%s->%s]\n", nickname.c_str(), new_nickname.c_str());
+    nickname = new_nickname;
+    string notification= "Changed nickname to " + new_nickname;
+    send_notification(nickname, notification);
   }
   else if (type == 'M'){ //message to one
     // M00receiver000message
     string size_rcv(2, '0'), size_msg(3, '0');
     ss.read(size_rcv.data(), size_rcv.size());
+
     string receiver(stoi(size_rcv), '0');
     ss.read(receiver.data(), receiver.size());
+
+    if (clientNames.find(receiver) == clientNames.end()){ // Validation if receiver is online
+      string notification= "User " + receiver + " is not online";
+      send_notification(nickname, notification);
+      return;
+    }
+    
     ss.read(size_msg.data(), size_msg.size());
     string message(stoi(size_msg), '0');
+    
     ss.read(message.data(), message.size());
-    printf("Message from %s to %s: [%s]\n", sender.c_str(), receiver.c_str(), message.c_str());
-    ostringstream size_sender;
-    size_sender << setw(2) << setfill('0') << sender.size();
-    os << 'M' << size_sender.str() << sender << size_msg << message;
+    printf("Message from %s to %s: [%s]\n", nickname.c_str(), receiver.c_str(), message.c_str());
+    
+    ostringstream size_nickname;
+    size_nickname << setw(2) << setfill('0') << nickname.size();
+    os << 'M' << size_nickname.str() << nickname << size_msg << message;
     int n = send(clientNames[receiver], os.str().c_str(), strlen(os.str().c_str()), 0); 
     if (n < 0)
       perror("ERROR writing to socket");
@@ -182,6 +201,8 @@ void processing(int ConnectFD, string &sender, char buff[SIZE]){
     printf("List of online clients sent: [%s]\n", os.str().c_str());
   }
   else if (type == 'Q'){ //quit
-    killConnection(ConnectFD, sender);
+    // Q00
+    kill = true;
+    kill_connection(nickname);
   }
 }
