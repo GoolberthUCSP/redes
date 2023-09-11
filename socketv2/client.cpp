@@ -143,6 +143,10 @@ int main(int argc, char *argv[]){
       printf("Error in your message\n");
       continue;
     }
+    else if (packet == "CLEAR"){
+      system("clear || cls");
+      continue;
+    }
     n = send(SocketFD, packet.c_str(), strlen(packet.c_str()), 0);
     if (n < 0)
       perror("ERROR writing to socket");
@@ -180,7 +184,8 @@ string encoding(char buff[SIZE]){
   } 
   else if (type == 'w') { //Message to all
     // W,message
-    string message(ss.str());
+    string message;
+    getline(ss, message);
     ostringstream size;
     size << setw(3) << setfill('0') << message.size();
     output << 'W' << size.str() << message;
@@ -193,6 +198,9 @@ string encoding(char buff[SIZE]){
     // Q || q
     output << 'Q' << "00";
   } 
+  else if (type == 'c') { //Clear terminal
+    output << "CLEAR";
+  }
   else { //Error in message
     output << "ERROR";
   }

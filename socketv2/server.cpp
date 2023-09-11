@@ -192,10 +192,9 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
   }
   else if (type == 'W'){ //message to all
     // W000message
-    os << 'W' << ss.str();
-    size_t size_os= os.str().size();
+    os << ss.str();
     for (auto client: clientNames){
-      int n = send(client.second, os.str().c_str(), size_os, 0);
+      int n = send(client.second, os.str().c_str(), strlen(os.str().c_str()), 0);
       if (n < 0)
         perror("ERROR writing to socket");
       printf("Message replay to %s: [%s]\n", client.first.c_str(), os.str().c_str());
