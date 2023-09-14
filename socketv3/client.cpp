@@ -207,8 +207,8 @@ string encoding(char buff[SIZE]){
     ostringstream size_rcv, size_fn;
     size_rcv << setw(2) << setfill('0') << rcv.size();
     size_fn << setw(5) << setfill('0') << filename.size();
-    filename= "data/" + filename;
-    infile.open(filename, ios::binary);
+    //filename= "data/" + filename;
+    infile.open("data/" + filename, ios::binary);
     if (!infile.good()){
       output << "ERROR: File not found in " << filename;
       return output.str();
@@ -222,6 +222,7 @@ string encoding(char buff[SIZE]){
     string buffer(size_file, '0');
     infile.read(buffer.data(), size_file);
     infile.close();
+    //filename = filename.substr(5,filename.size());
     string hash_data, datetime;
     hash_data= get_hash(buffer);
     datetime= get_datetime();
@@ -250,6 +251,7 @@ void decoding(char buff[SIZE]){
 
   stringstream ss;
   ss << buff;
+  //cout << ss.str() << endl;
   char type;
   ss >> type;
 
@@ -315,10 +317,11 @@ void decoding(char buff[SIZE]){
     
     ss.read(size_file.data(), size_file.size());
     string file_buffer(stoi(size_file), '0');
-
+    ss.read(file_buffer.data(), file_buffer.size());
     ss.read(hash_data_str.data(), hash_data_str.size());
-    string hash_file_rcv= get_hash(file_buffer);
 
+    cout << sender << size_file << file_buffer << endl;
+    string hash_file_rcv= get_hash(file_buffer);
     replay_hash(sender, size_sdr, hash_file_rcv);
 
     // Validate hash value
@@ -331,13 +334,25 @@ void decoding(char buff[SIZE]){
       outfile.close();
     }
   }
+  else if (type == 'R'){ //confirmation
+    //R00sender(10B hash)
+    string size_sdr(2, '0'), hash_code(10, '0');
+    ss.read(size_sdr.data(), size_sdr.size());
+
+    string sender(stoi(size_sdr), '0');
+    ss.read(sender.data(), sender.size());
+    
+    ss.read(hash_code.data(), hash_code.size());
+    
+    cout << "Hash number from " << sender << ": " << hash_code << endl;
+  }
 }
 
 string get_hash(string buffer){
   // Hash value is only the sum of the characters of the message
   ostringstream hash_value;
-  int value;
-  for (int i = 0; i < buffer.size(); i++){
+  int value, n= buffer.size();
+  for (int i = 0; i < n; i++){
     value += buffer[i];
   }
   hash_value << setw(10) << setfill('0') << value;

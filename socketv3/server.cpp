@@ -216,9 +216,9 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
       perror("ERROR writing to socket");
     printf("List of online clients sent: [%s]\n", os.str().c_str());
   }
-  else if (type == 'R'){ //message file to one
+  else if (type == 'F'){ //message file to one
     // F00receiver00000filename(10B size of file)(file)(10B hash value)(14B datetime of sent file in YYYYMMDDhhmmss)
-    string size_rcv(2, '0'), size_fn(3, '0'), size_file(10, '0'), hash_data_str(10, '0'), datetime(14, '0');
+    string size_rcv(2, '0'), size_fn(5, '0'), size_file(10, '0'), hash_data_str(10, '0'), datetime(14, '0');
     ss.read(size_rcv.data(), size_rcv.size());
 
     string receiver(stoi(size_rcv), '0');
@@ -236,18 +236,37 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     ss.read(filename.data(), filename.size());
 
     ss.read(size_file.data(), size_file.size());
-    string file(stoi(size_file), '0');
+    string file(stoi(size_file), '\0');
     ss.read(file.data(), file.size());
 
     ss.read(hash_data_str.data(), hash_data_str.size());
-    string hash_data(stoi(hash_data_str), '0');
 
     ss.read(datetime.data(), datetime.size());
 
     ostringstream replay_message, size_nickname;
     size_nickname << setw(2) << setfill('0') << nickname.size();
 
-    replay_message << 'F' << size_nickname.str() << nickname << size_fn << filename << size_file << file << hash_data << datetime;
+    replay_message << 'F' << size_nickname.str() << nickname << size_fn << filename << size_file << file << hash_data_str << datetime;
+
+    int n = send(clientNames[receiver], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
+    if (n < 0)
+      perror("ERROR writing to socket");
+    printf("Message replay to %s: [%s]\n", receiver.c_str(), replay_message.str().c_str());
+  }
+  else if (type == 'R'){ //confirmation
+    //R00receiver(10B hash)
+    string size_rcv(2, '0'), hash_code(10, '0');
+    ss.read(size_rcv.data(), size_rcv.size());
+
+    string receiver(stoi(size_rcv), '0');
+    ss.read(receiver.data(), receiver.size());
+
+    ss.read(hash_code.data(), hash_code.size());
+
+    ostringstream replay_message, size_nickname;
+    size_nickname << setw(2) << setfill('0') << nickname.size();
+
+    replay_message << 'R' << size_nickname.str() << nickname << hash_code; 
 
     int n = send(clientNames[receiver], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
     if (n < 0)
