@@ -1,5 +1,6 @@
 /* Server code in CPP */
 
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -16,6 +17,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 #define SIZE 131072
 
@@ -38,6 +40,8 @@ void thread_reader(int ConnectFD, string sender){
     if (n < 0)
       perror("ERROR reading from socket");
 
+    printf("Request from %s: [%s]\n", sender.c_str(), buffer);
+    
     processing(ConnectFD, nickname, buffer, kill);
   }
 }
@@ -239,6 +243,9 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     string file(stoi(size_file), '\0');
     ss.read(file.data(), file.size());
 
+    //std::vector<uint8_t> file(stoi(size_file), '\0');
+    //ss.read(reinterpret_cast<char*>(file.data()), file.size());
+    
     ss.read(hash_data_str.data(), hash_data_str.size());
 
     ss.read(datetime.data(), datetime.size());
@@ -248,10 +255,10 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
 
     replay_message << 'F' << size_nickname.str() << nickname << size_fn << filename << size_file << file << hash_data_str << datetime;
 
-    int n = send(clientNames[receiver], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
+    int n = write(clientNames[receiver], replay_message.str().data(), replay_message.str().size());
     if (n < 0)
       perror("ERROR writing to socket");
-    printf("Message replay to %s: [%s]\n", receiver.c_str(), replay_message.str().c_str());
+    printf("Message replay to %s: [%s]\n", receiver.c_str(), replay_message.str().data());
   }
   else if (type == 'R'){ //confirmation
     //R00receiver(10B hash)

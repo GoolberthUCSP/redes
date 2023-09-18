@@ -30,7 +30,7 @@ int SocketFD = socket(AF_INET, SOCK_STREAM, 0); // IPPROTO_TCP
 string encoding(char message[SIZE]);
 void decoding(char message[SIZE]);
 void replay_hash(string &nickname, string &size_nickname, string &hash_file);
-string get_hash(string buffer);
+string get_hash(string buffer, int buff_size);
 string get_datetime();
 
 void thread_reader(int SocketFD){
@@ -46,9 +46,10 @@ void thread_reader(int SocketFD){
     if (n == 0){ //Disconnected
       printf("Disconnected from server\n");
       close(SocketFD);
+      system("cls || clear");
       exit(EXIT_SUCCESS);
     }
-    
+
     decoding(buffer);
   }
 }
@@ -156,10 +157,11 @@ int main(int argc, char *argv[]){
       system("clear || cls");
       continue;
     }
-    n = send(SocketFD, packet.c_str(), strlen(packet.c_str()), 0);
-    if (n < 0)
+    
+    n = write(SocketFD, packet.data(), packet.size());
+    if (n == -1)
       perror("ERROR writing to socket");
-      
+
   }
   return 0;
 }
@@ -219,13 +221,14 @@ string encoding(char buff[SIZE]){
     ostringstream size;
     size << setw(10) << setfill('0') << size_file;
     infile.seekg(0, infile.beg);
-    string buffer(size_file, '0');
+    string buffer(size_file, '\0');
     infile.read(buffer.data(), size_file);
     infile.close();
     //filename = filename.substr(5,filename.size());
     string hash_data, datetime;
-    hash_data= get_hash(buffer);
+    hash_data= get_hash(buffer, size_file);
     datetime= get_datetime();
+    cout << "File sending with hash: " << hash_data << endl;
     output << 'F' << size_rcv.str() << rcv << size_fn.str() << filename << size.str() << buffer << hash_data << datetime;
   }
   else if (type == 'l') { //List all online
@@ -316,23 +319,22 @@ void decoding(char buff[SIZE]){
     ss.read(filename.data(), filename.size());
     
     ss.read(size_file.data(), size_file.size());
-    string file_buffer(stoi(size_file), '0');
+    string file_buffer(stoi(size_file), '\0');
     ss.read(file_buffer.data(), file_buffer.size());
     ss.read(hash_data_str.data(), hash_data_str.size());
 
-    cout << sender << size_file << file_buffer << endl;
-    string hash_file_rcv= get_hash(file_buffer);
+    string hash_file_rcv= get_hash(file_buffer, stoi(size_file));
     replay_hash(sender, size_sdr, hash_file_rcv);
 
     // Validate hash value
-    if (hash_file_rcv == hash_data_str){
+    //if (hash_file_rcv == hash_data_str){
       ss.read(datetime.data(), datetime.size());
       cout << "File received from " << sender << ": " << filename << endl;
       // Save file
       outfile.open("out/" + filename, ios::binary);
       outfile.write(file_buffer.data(), file_buffer.size());
       outfile.close();
-    }
+    //}
   }
   else if (type == 'R'){ //confirmation
     //R00sender(10B hash)
@@ -348,11 +350,11 @@ void decoding(char buff[SIZE]){
   }
 }
 
-string get_hash(string buffer){
+string get_hash(string buffer, int buff_size){
   // Hash value is only the sum of the characters of the message
   ostringstream hash_value;
-  int value, n= buffer.size();
-  for (int i = 0; i < n; i++){
+  int value;
+  for (int i = 0; i < buff_size; i++){
     value += buffer[i];
   }
   hash_value << setw(10) << setfill('0') << value;
