@@ -22,7 +22,7 @@ Servidor y clientes deben usar el mismo puerto para la comunicación, por defect
 
 ## socketv2
 
-El mismo chat del anterior *socket*, pero usando un protocolo para el envío y recibo de mensajes por parte de clientes y servidor. La compilación y la ejecución es igual al la versión anterior.
+Añadido un protocolo para el envío y recibo de mensajes por parte de clientes y servidor.
 
 - Las reglas para el ingreso de datos por el teclado es la siguiente:
     + Para cambiar el username se debe escribir: *N,new_username*.
@@ -30,3 +30,10 @@ El mismo chat del anterior *socket*, pero usando un protocolo para el envío y r
     + Para enviar un mensaje a todos se debe escribir: *W,message*.
     + Para pedir la lista de clientes conectados se debe escribir: *L*.
     + Por último, para desconectarse del servidor se debe escribir: *Q*.
+
+## socketv3
+
+Añadido la opción de enviar archivos menos de 100kB por defecto. Si se envía un tamaño mayor, éste no será enviado en su totalidad. El que envía el archivo podrá ver que se envió correctamente el archivo comparando los *hash_number* del archivo a enviar y del recibido.
+
+- La regla para el envío de datos:
+    + Para enviar un archivo a una persona se debe escribir: *F,receiver,filename* en donde filename es el nombre del archivo y este debe contener su extensión.
