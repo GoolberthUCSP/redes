@@ -23,16 +23,17 @@
 
 using namespace std;
 
-void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill);
+void processing(int ConnectFD, string &nickname, unsigned char buff[SIZE], bool &kill);
 void kill_connection(string &nickname);
 void send_notification(string &nickname, string notification);
+void wrt_vec(vector<unsigned char> &vec, string data);
 
 map<string, int> clientNames; //clientNames[clientName] = SocketFD
 
 void thread_reader(int ConnectFD, string sender){
   string nickname(sender);
   bool kill = false;
-  char buffer[SIZE];
+  unsigned char buffer[SIZE];
   int n;
   while (!kill){
     bzero(buffer, SIZE);
@@ -40,7 +41,7 @@ void thread_reader(int ConnectFD, string sender){
     if (n < 0)
       perror("ERROR reading from socket");
 
-    printf("Request from %s: [%s]\n", sender.c_str(), buffer);
+    //printf("Request from %s: [%s]\n", sender.c_str(), buffer);
     
     processing(ConnectFD, nickname, buffer, kill);
   }
@@ -140,9 +141,11 @@ void send_notification(string &nickname, string notification){
   printf("Notification to %s: [%s]\n", nickname.c_str(), notification.c_str());
 }
 
-void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
-  stringstream ss(buff);
-  ostringstream os;
+void processing(int ConnectFD, string &nickname, unsigned char buff[SIZE], bool &kill){
+  stringstream ss;
+  vector<unsigned char> os;
+
+  ss.write((char *)buff, SIZE);
   char type;
   ss >> type;
 
@@ -188,20 +191,21 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     
     ostringstream size_nickname;
     size_nickname << setw(2) << setfill('0') << nickname.size();
-    os << 'M' << size_nickname.str() << nickname << size_msg << message;
-    int n = send(clientNames[receiver], os.str().c_str(), strlen(os.str().c_str()), 0); 
+    //os << 'M' << size_nickname.str() << nickname << size_msg << message;
+    wrt_vec(os, 'M' + size_nickname.str() + nickname + size_msg + message);
+    int n = send(clientNames[receiver], (char*)os.data(), os.size(), 0); 
     if (n < 0)
       perror("ERROR writing to socket");
-    printf("Message replay to %s: [%s]\n", receiver.c_str(), os.str().c_str());
+    printf("Message replay to %s: [%s]\n", receiver.c_str(), os.data());
   }
   else if (type == 'W'){ //message to all
     // W000message
-    os << ss.str();
+    wrt_vec(os, ss.str());
     for (auto client: clientNames){
-      int n = send(client.second, os.str().c_str(), strlen(os.str().c_str()), 0);
+      int n = send(client.second, (char*)os.data(), os.size(), 0);
       if (n < 0)
         perror("ERROR writing to socket");
-      printf("Message replay to %s: [%s]\n", client.first.c_str(), os.str().c_str());
+      printf("Message replay to %s: [%s]\n", client.first.c_str(), os.data());
     }
     printf("Message replay to all: [DONE]\n");
   }
@@ -214,11 +218,11 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     names = names.substr(0, names.size()-1); //remove last comma
     ostringstream size_names;
     size_names << setw(3) << setfill('0') << names.size();
-    os << 'L' << size_names.str() << names;
-    int n = send(ConnectFD, os.str().c_str(), strlen(os.str().c_str()), 0);
+    wrt_vec(os, 'L' + size_names.str() + names);
+    int n = send(ConnectFD, (char*)os.data(), os.size(), 0);
     if (n < 0)
       perror("ERROR writing to socket");
-    printf("List of online clients sent: [%s]\n", os.str().c_str());
+    printf("List of online clients sent: [%s]\n", os.data());
   }
   else if (type == 'F'){ //message file to one
     // F00receiver00000filename(10B size of file)(file)(10B hash value)(14B datetime of sent file in YYYYMMDDhhmmss)
@@ -240,25 +244,26 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     ss.read(filename.data(), filename.size());
 
     ss.read(size_file.data(), size_file.size());
-    string file(stoi(size_file), '\0');
-    ss.read(file.data(), file.size());
-
-    //std::vector<uint8_t> file(stoi(size_file), '\0');
-    //ss.read(reinterpret_cast<char*>(file.data()), file.size());
+    vector<unsigned char> file(stoi(size_file));
+    ss.read((char*)file.data(), file.size());
     
     ss.read(hash_data_str.data(), hash_data_str.size());
 
     ss.read(datetime.data(), datetime.size());
 
-    ostringstream replay_message, size_nickname;
+    ostringstream size_nickname;
+    vector<unsigned char> replay_message;
     size_nickname << setw(2) << setfill('0') << nickname.size();
 
-    replay_message << 'F' << size_nickname.str() << nickname << size_fn << filename << size_file << file << hash_data_str << datetime;
+    wrt_vec(replay_message, 'F' + size_nickname.str() + nickname + size_fn + filename + size_file);
+    copy(file.begin(), file.end(), back_inserter(replay_message));
+    wrt_vec(replay_message, hash_data_str + datetime);
+    string replay_print= 'F' + size_nickname.str() + nickname + size_fn + filename + size_file + "FILE" + hash_data_str + datetime;
 
-    int n = write(clientNames[receiver], replay_message.str().data(), replay_message.str().size());
+    int n = write(clientNames[receiver], replay_message.data(), replay_message.size());
     if (n < 0)
       perror("ERROR writing to socket");
-    printf("Message replay to %s: [%s]\n", receiver.c_str(), replay_message.str().data());
+    printf("Message replay to %s: [%s]\n", receiver.c_str(), replay_print.c_str());
   }
   else if (type == 'R'){ //confirmation
     //R00receiver(10B hash)
@@ -284,5 +289,11 @@ void processing(int ConnectFD, string &nickname, char buff[SIZE], bool &kill){
     // Q00
     kill = true;
     kill_connection(nickname);
+  }
+}
+
+void wrt_vec(vector<unsigned char> &vec, string data){
+  for (auto c: data){
+    vec.push_back((unsigned char)c);
   }
 }

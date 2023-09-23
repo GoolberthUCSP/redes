@@ -27,14 +27,15 @@ ifstream infile;
 ofstream outfile;
 int SocketFD = socket(AF_INET, SOCK_STREAM, 0); // IPPROTO_TCP
 
-string encoding(char message[SIZE]);
-void decoding(char message[SIZE]);
+vector<unsigned char> encoding(unsigned char message[SIZE]);
+void decoding(unsigned char message[SIZE]);
 void replay_hash(string &nickname, string &size_nickname, string &hash_file);
-string get_hash(string buffer, int buff_size);
+void wrt_vec(vector<unsigned char> &vec, string data);
+string get_hash(vector<unsigned char> buffer, int buff_size);
 string get_datetime();
 
 void thread_reader(int SocketFD){
-  char buffer[SIZE];
+  unsigned char buffer[SIZE];
   int n;
   while (1){
     bzero(buffer, SIZE);
@@ -54,7 +55,7 @@ void thread_reader(int SocketFD){
   }
 }
 
-bool validate_nickname(string nickname, char buff[SIZE]){
+bool validate_nickname(string nickname, unsigned char buff[SIZE]){
   string size, nick;
   vector<string> nicknames;
   stringstream ss;
@@ -85,7 +86,8 @@ int main(int argc, char *argv[]){
   struct sockaddr_in stSockAddr;
   int Res;
   int n;
-  char buffer[SIZE];
+  unsigned char buffer[SIZE];
+  string line;
 
   if (-1 == SocketFD){
     perror("cannot create socket");
@@ -145,75 +147,75 @@ int main(int argc, char *argv[]){
   // Infinite loop waiting for messages from keyboard
   while(1){ 
     bzero(buffer, SIZE);
-    fgets(buffer, SIZE-1, stdin);
-    buffer[strcspn(buffer, "\n")] = '\0';
+    getline(cin, line);
+    copy(line.begin(), line.end(), buffer);
 
-    string packet= encoding(buffer);
+    vector<unsigned char> packet= encoding(buffer);
     if (packet[0] == 'E'){ //Error message
-      printf("%s\n", packet.c_str());
+      printf("%s\n", packet.data());
       continue;
     }
     else if (packet[0] == 'C'){ //Clear screen
       system("clear || cls");
       continue;
     }
-    
+
     n = write(SocketFD, packet.data(), packet.size());
     if (n == -1)
       perror("ERROR writing to socket");
-
+    cin.clear();
   }
   return 0;
 }
 
-string encoding(char buff[SIZE]){
+vector<unsigned char> encoding(unsigned char buff[SIZE]){
   // SIZE_RECEIVER => [01..99] = 2 char, SIZE_MESSAGE => [001..999] = 3 char
   stringstream ss;
-  ostringstream output;
+  vector<unsigned char> output;
 
-  ss << buff;
+  ss.write((char *)buff, SIZE);
   char type, cm;
   ss >> type >> cm; //clearing the comma
   type= tolower(type);
   if (type == 'n') { //Change name
     // N,nickname
     string name;
-    getline(ss, name);
+    getline(ss, name, '\0');
     ostringstream size;
     size << setw(2) << setfill('0') << name.size();
-    output << 'N' << size.str() << name;
+    wrt_vec(output, 'N' + size.str() + name);
   } 
   else if (type == 'm') { //Message to one
     // M,receiver,message
     string rcv, message; //receiver, message
     getline(ss, rcv, ',');
-    getline(ss, message);
+    getline(ss, message, '\0');
     ostringstream size_rcv, size_msg;
     size_rcv << setw(2) << setfill('0') << rcv.size();
     size_msg << setw(3) << setfill('0') << message.size();
-    output << 'M' << size_rcv.str() << rcv << size_msg.str() << message;
+    wrt_vec(output, 'M' + size_rcv.str() + rcv + size_msg.str() + message);
   } 
   else if (type == 'w') { //Message to all
     // W,message
     string message;
-    getline(ss, message);
+    getline(ss, message, '\0');
     ostringstream size;
     size << setw(3) << setfill('0') << message.size();
-    output << 'W' << size.str() << message;
+    wrt_vec(output, 'W' + size.str() + message);
   }
   else if (type == 'f'){ //Send file
     // F || f,receiver,filename
     string rcv, filename;
     getline(ss, rcv, ',');
-    getline(ss, filename);
+    getline(ss, filename, '\0');
     ostringstream size_rcv, size_fn;
     size_rcv << setw(2) << setfill('0') << rcv.size();
     size_fn << setw(5) << setfill('0') << filename.size();
-    //filename= "data/" + filename;
     infile.open("data/" + filename, ios::binary);
-    if (!infile.good()){
-      output << "ERROR: File not found in " << filename;
-      return output.str();
+    if (!infile.good()) {
+      string error_message = "ERROR: File not found in data/" + filename;
+      wrt_vec(output, error_message);
+      return output;
     }
     // Open existent file
     infile.seekg(0, infile.end);
@@ -221,39 +223,41 @@ string encoding(char buff[SIZE]){
     ostringstream size;
     size << setw(10) << setfill('0') << size_file;
     infile.seekg(0, infile.beg);
-    string buffer(size_file, '\0');
-    infile.read(buffer.data(), size_file);
+    vector<unsigned char> buffer(size_file, '\0');
+    infile.read(reinterpret_cast<char*>(buffer.data()), size_file);
     infile.close();
-    //filename = filename.substr(5,filename.size());
     string hash_data, datetime;
-    hash_data= get_hash(buffer, size_file);
-    datetime= get_datetime();
+    hash_data = get_hash(buffer, size_file);
+    datetime = get_datetime();
     cout << "File sending with hash: " << hash_data << endl;
-    output << 'F' << size_rcv.str() << rcv << size_fn.str() << filename << size.str() << buffer << hash_data << datetime;
+    wrt_vec(output, 'F' + size_rcv.str() + rcv + size_fn.str() + filename + size.str());
+    copy(buffer.begin(), buffer.end(), back_inserter(output));
+    wrt_vec(output, hash_data + datetime);
   }
   else if (type == 'l') { //List all online
     // L || l
-    output << 'L' << "00";
+    wrt_vec(output, "L00");
   } 
   else if (type == 'q') { //End connection
     // Q || q
-    output << 'Q' << "00";
+    wrt_vec(output, "Q00");
   } 
   else if (type == 'c') { //Clear terminal
-    output << "CLEAR";
+    // C || c
+    wrt_vec(output, "CLEAR");
   }
   else { //Error in message
-    output << "ERROR: Invalid message type.";
+    wrt_vec(output, "ERROR: Invalid message");
   }
-  return output.str();
+  return output;
 }
 
-void decoding(char buff[SIZE]){
+void decoding(unsigned char buff[SIZE]){
   // Decoding the packet and printing it
   // SIZE_RECEIVER => [01..99] = 2 char, SIZE_MESSAGE => [001..999] = 3 char
 
   stringstream ss;
-  ss << buff;
+  ss.write((char *)buff, SIZE);
   //cout << ss.str() << endl;
   char type;
   ss >> type;
@@ -319,10 +323,10 @@ void decoding(char buff[SIZE]){
     ss.read(filename.data(), filename.size());
     
     ss.read(size_file.data(), size_file.size());
-    string file_buffer(stoi(size_file), '\0');
-    ss.read(file_buffer.data(), file_buffer.size());
-    ss.read(hash_data_str.data(), hash_data_str.size());
+    std::vector<unsigned char> file_buffer(stoi(size_file));
+    ss.read((char*)file_buffer.data(), file_buffer.size());
 
+    ss.read(hash_data_str.data(), hash_data_str.size());
     string hash_file_rcv= get_hash(file_buffer, stoi(size_file));
     replay_hash(sender, size_sdr, hash_file_rcv);
 
@@ -332,7 +336,7 @@ void decoding(char buff[SIZE]){
       cout << "File received from " << sender << ": " << filename << endl;
       // Save file
       outfile.open("out/" + filename, ios::binary);
-      outfile.write(file_buffer.data(), file_buffer.size());
+      outfile.write((char*)file_buffer.data(), file_buffer.size());
       outfile.close();
     //}
   }
@@ -350,10 +354,10 @@ void decoding(char buff[SIZE]){
   }
 }
 
-string get_hash(string buffer, int buff_size){
+string get_hash(vector<unsigned char> buffer, int buff_size){
   // Hash value is only the sum of the characters of the message
   ostringstream hash_value;
-  int value;
+  int value = 0;
   for (int i = 0; i < buff_size; i++){
     value += buffer[i];
   }
@@ -381,4 +385,10 @@ void replay_hash(string &sender, string &size_sdr, string &hash){
   int n = send(SocketFD, output.str().c_str(), output.str().size(), 0);
   if ( n < 0)
     perror("ERROR writing to socket");
+}
+
+void wrt_vec(vector<unsigned char> &vec, string data){
+  for (auto c: data){
+    vec.push_back((unsigned char)c);
+  }
 }
