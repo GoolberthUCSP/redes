@@ -37,3 +37,21 @@ Añadido la opción de enviar archivos menos de 100kB por defecto. Si se envía 
 
 - La regla para el envío de datos:
     + Para enviar un archivo a una persona se debe escribir: *F,receiver,filename* en donde filename es el nombre del archivo y este debe contener su extensión.
+
+## socketv4
+
+Añadido la opción de jugar TicTacToe entre 2 clientes, todos los demás clientes solo podrán ver el tablero del juego.
+
+- La regla para iniciar el juego es:
+    + Para registrarse un jugador se debe escribir *B*.
+    + En caso de que ya existan 2 jugadores, no se podrá registrar.
+    + Inicia el primero en registrarse.
+    + Los símbolos que se les asigna son random.
+
+- La regla para jugar es:
+    + Para realizar una jugada o marcar un casillero se debe escribir: *P,number* en donde *number* es un número entre 1 y 9; éste es el número del casillero.
+    + En caso de que no sea su turno, se le enviará una notificación de que no puede realizar la jugada.
+    + En caso de que alguien gane o el tablero esté lleno, se les enviará una notificación y se reiniciará el juego; luego, se podrán registrar nuevos jugadores.
+
+- La regla para visualizar el tablero es:
+    + Escribir: *V* y podrá visualizar el estado actual del tablero.
