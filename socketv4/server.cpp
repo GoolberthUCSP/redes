@@ -41,11 +41,13 @@ void send_file_confirmation(stringstream &ss, int ConnectFD, string &nickname);
 void initialize_game(int ConnectFD, string &nickname);
 void play_game(stringstream &ss, int ConnectFD, string &nickname);
 void view_board(int ConnectFD, string &nickname);
+void send_board_state();
 void reinitialize_game();
 
 map<string, int> clientNames; //clientNames[clientName] = SocketFD
 TicTacToe *ttt = nullptr;
-vector<pair<string, char>> players;
+vector<pair<string, char>> ttt_players;
+vector<string> ttt_viewers;
 char symbols[2]{'O','X'};
 int rand_num;
 
@@ -64,7 +66,6 @@ void thread_reader(int ConnectFD, string sender){
       kill_connection(nickname);
       return;
     }
-    //printf("Request from %s: [%s]\n", sender.c_str(), buffer);
     
     processing(ConnectFD, nickname, buffer, kill);
   }
@@ -359,21 +360,19 @@ void send_file_confirmation(stringstream &ss, int ConnectFD, string &nickname){
 }
 void initialize_game(int ConnectFD, string &nickname){
   // B000
-  if (players.size() == 0){ // If there is no one gamer
-    players.push_back(make_pair(nickname, symbols[rand_num]));
+  if (ttt_players.size() == 0){ // If there is no one gamer
+    ttt_players.push_back(make_pair(nickname, symbols[rand_num]));
     send_notification(nickname, "Success, your symbol is " + string(1, symbols[rand_num]) + ", waiting for your turn");
   }
-  else if (players.size() == 1){ // If there is only one player
-    players.push_back(make_pair(nickname, symbols[1-rand_num]));
+  else if (ttt_players.size() == 1){ // If there is only one player
+    ttt_players.push_back(make_pair(nickname, symbols[1-rand_num]));
+    ttt = new TicTacToe(ttt_players[0], ttt_players[1], ttt_players[0].second);
     send_notification(nickname, "Success, your symbol is " + string(1, symbols[1-rand_num]) + ", waiting for your turn");
-    string notify= "Players: " + players[0].first + " - " + players[1].first;
-    send_notification(players[0].first, notify);
-    send_notification(players[1].first, notify);
-    send_notification(players[0].first, "You can play now");
-    ttt = new TicTacToe(players[0], players[1], players[0].second);
+    send_board_state();
+    send_notification(ttt_players[0].first, "You can play now. It's your turn");
   }
-  else{ // If there are two players
-    send_notification(nickname, "Error, there are already 2 players");
+  else{ // If there are two ttt_players
+    send_notification(nickname, "Error, there are already 2 ttt_players");
   }
 }
 void play_game(stringstream &ss, int ConnectFD, string &nickname){
@@ -398,38 +397,31 @@ void play_game(stringstream &ss, int ConnectFD, string &nickname){
     return;
   }
   else{
-    ostringstream size_board, replay_message;
-    string board = ttt->get_board();
-    size_board << setw(2) << setfill('0') << board.size();
-    replay_message << 'V' << size_board.str() << board;
-    int n = send(clientNames[ttt->get_turn_now()], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
-    if (n < 0)
-      perror("ERROR writing to socket");
-    printf("Message replay to %s: [%s]\n", nickname.c_str(), replay_message.str().c_str());
-
-    n = send(clientNames[ttt->get_turn_next()], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
-    if (n < 0)
-      perror("ERROR writing to socket");
     
-    printf("Message replay to %s: [%s]\n", nickname.c_str(), replay_message.str().c_str());
-
+    send_board_state();
+    
     if (ttt->verify_winner()){
       string winner = ttt->get_winner();
       string loser = ttt->get_loser();
-      string result= "Winner: " + winner + ", Loser: " + loser;
+      string result= "WINNER: " + winner + ", LOSER: " + loser;
       send_notification(winner, result);
       send_notification(loser, result);
-      // TODO: implement viewers
+      for (auto viewer : ttt_viewers){
+        send_notification(viewer, result);
+      }
       reinitialize_game();
     }
     else if (ttt->is_full()){
-      send_notification(ttt->player_1.first, "The game is a draw");
-      send_notification(ttt->player_2.first, "The game is a draw");
-      // TODO: implement viewers
+      string result = "The game is a draw";
+      send_notification(ttt->player_1.first, result);
+      send_notification(ttt->player_2.first, result);
+      for (auto viewer : ttt_viewers){
+        send_notification(viewer, result);
+      }
       reinitialize_game();
     }
     else
-      send_notification(ttt->get_turn_now(), "Your turn");
+      send_notification(ttt->get_turn_now(), "It's your turn");
   }
 }
 void view_board(int ConnectFD, string &nickname){
@@ -438,10 +430,26 @@ void view_board(int ConnectFD, string &nickname){
     send_notification(nickname, "Error, the game has not been initialized");
     return;
   }
-  ostringstream replay_message, size_board;
+  if (ttt->verify_player(nickname)){
+    send_notification(nickname, "Error, you are a player, you cannot be a viewer");
+    return;
+  }
+  if (auto viewer = find(ttt_viewers.begin(), ttt_viewers.end(), nickname) != ttt_viewers.end()){
+    send_notification(nickname, "Error, you are already a viewer");
+    return;
+  }
+  ttt_viewers.push_back(nickname);
+  send_notification(nickname, "Success, you can now view the board");
+
+  ostringstream replay_message, size_board, size_player_x, size_player_o;
   string board = ttt->get_board();
+  string player_x= ttt->get_player_x();
+  string player_o= ttt->get_player_o();
+
   size_board << setw(2) << setfill('0') << board.size();
-  replay_message << 'V' << size_board.str() << board;
+  size_player_x << setw(2) << setfill('0') << player_x.size();
+  size_player_o << setw(2) << setfill('0') << player_o.size();
+  replay_message << 'V' << size_player_x.str() << player_x << size_player_o.str() << player_o << size_board.str() << board;
   int n = send(ConnectFD, replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
   if (n < 0)
     perror("ERROR writing to socket");
@@ -454,8 +462,38 @@ void wrt_vec(vector<unsigned char> &vec, string data){
   }
 }
 
+void send_board_state(){
+  ostringstream replay_message, size_board, size_player_x, size_player_o;
+  string board = ttt->get_board();
+  string player_x= ttt->get_player_x();
+  string player_o= ttt->get_player_o();
+
+  size_board << setw(2) << setfill('0') << board.size();
+  size_player_x << setw(2) << setfill('0') << player_x.size();
+  size_player_o << setw(2) << setfill('0') << player_o.size();
+  replay_message << 'V' << size_player_x.str() << player_x << size_player_o.str() << player_o << size_board.str() << board;
+  
+  int n = send(clientNames[ttt_players[0].first], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
+  if (n < 0)
+    perror("ERROR writing to socket");
+  printf("Message replay to %s: [%s]\n", ttt_players[0].first.c_str(), replay_message.str().c_str());
+
+  n = send(clientNames[ttt_players[1].first], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
+  if (n < 0)
+    perror("ERROR writing to socket");
+  printf("Message replay to %s: [%s]\n", ttt_players[1].first.c_str(), replay_message.str().c_str());
+
+  for (int i= 0; i< ttt_viewers.size(); i++){
+    n = send(clientNames[ttt_viewers[i]], replay_message.str().c_str(), strlen(replay_message.str().c_str()), 0);
+    if (n < 0)
+      perror("ERROR writing to socket");
+    printf("Message replay to %s: [%s]\n", ttt_viewers[i].c_str(), replay_message.str().c_str());
+  }
+}
+
 void reinitialize_game(){
   ttt = nullptr;
-  players.clear();
+  ttt_players.clear();
+  ttt_viewers.clear();
   rand_num = rand() % 2;
 }

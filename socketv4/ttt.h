@@ -83,6 +83,12 @@ struct TicTacToe{
     string get_loser(){
         return winner == player_1.second ? player_2.first : player_1.first;
     }
+    string get_player_x(){
+        return player_1.second == 'X' ? player_1.first : player_2.first;
+    }
+    string get_player_o(){
+        return player_1.second == 'O' ? player_1.first : player_2.first;
+    }
     string get_board(){
         // return : X012O65, where the next numbers are the positions where X and O are
         string xs, os;
@@ -100,6 +106,7 @@ struct TicTacToe{
         // decode and print X012O65, where the next numbers are the positions where X and O are
         size_t i = state.find("O");
         string board_(9, '-');
+        cout << "Tic Tac Toe" << endl;
         for (int j = 1; j < i; j++) board_[state[j]-'0']= 'X';
         for (int j = i+1; j < state.size(); j++) board_[state[j]-'0']= 'O';
         for (int j = 0; j < 3; j++){
@@ -108,6 +115,11 @@ struct TicTacToe{
             }
             cout << endl;
         }
+    }
+    static void print_board(string state, string player_x, string player_o){
+        TicTacToe::print_board(state);
+        cout << "Player X: " << player_x << endl;
+        cout << "Player O: " << player_o << endl;
     }
 };
 

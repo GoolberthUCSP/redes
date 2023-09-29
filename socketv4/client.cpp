@@ -372,12 +372,21 @@ void decoding(unsigned char buff[SIZE]){
     cout << "Hash number from " << sender << ": " << hash_code << endl;
   }
   else if (type == 'V'){ //View game board
-    // V00(X1234Y5678= encoded board)
-    string size(2, '0');
-    ss.read(size.data(), size.size());
-    string board(stoi(size), '0');
+    // V00player_x00player_o00(X1234Y5678= encoded board)
+    string size_board(2, '0'), size_p_x(2, '0'), size_p_o(2, '0');
+
+    ss.read(size_p_x.data(), size_p_x.size());
+    string player_x(stoi(size_p_x), '0');
+    ss.read(player_x.data(), player_x.size());
+
+    ss.read(size_p_o.data(), size_p_o.size());
+    string player_o(stoi(size_p_o), '0');
+    ss.read(player_o.data(), player_o.size());
+
+    ss.read(size_board.data(), size_board.size());
+    string board(stoi(size_board), '0');
     ss.read(board.data(), board.size());
-    TicTacToe::print_board(board);
+    TicTacToe::print_board(board, player_x, player_o);
   }
 }
 
