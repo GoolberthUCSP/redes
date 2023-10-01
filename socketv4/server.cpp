@@ -53,11 +53,11 @@ char symbols[2]{'O','X'};
 int rand_num;
 
 void thread_reader(Clientp &client){
-
-  while (!client.disconnected){
+  while (client.is_connected()){
     client.recv_request();
     processing(client.nickname);
   }
+  kill_connection(client.nickname);
 }
 
 int main(int argc, char *argv[]){
@@ -203,13 +203,14 @@ void change_nickname(string &nickname){
     online_clients[nickname]->send_notification("Nickname already in use");
     return;
   }
-  int ConnectFD = online_clients[nickname]->ConnectFD;
+  
+  Clientp *client = online_clients[nickname];
   online_clients.erase(nickname);
-  online_clients[new_nickname] = new Clientp(ConnectFD, new_nickname);
+  online_clients[new_nickname] = client;
+  client->nickname = new_nickname;
 
-  printf("Client nickname changed: [%s->%s]\n", nickname.c_str(), new_nickname.c_str());
-  nickname = new_nickname;
-  online_clients[nickname]->send_notification("Changed nickname to " + new_nickname);
+  printf("Nickname changed from %s to %s\n", nickname.c_str(), new_nickname.c_str());
+  online_clients[new_nickname]->send_notification("Changed nickname to " + new_nickname);
 }
 void send_message_to_one(string &nickname){
   // M00receiver000message

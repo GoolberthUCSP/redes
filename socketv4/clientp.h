@@ -52,8 +52,8 @@ struct Clientp{ //For each client
     }
     void send_response(vector<unsigned char> send_vect){ //Send response to client : ONLY USED TO SEND FILE TO CLIENT
         
-        mtx.lock();
-        send_buffer.clear();
+        send_buffer.resize(0);
+        send_buffer.shrink_to_fit();
 
         ostringstream send_buff_size;
         send_buff_size << setw(10) << setfill('0') << send_vect.size();
@@ -66,33 +66,51 @@ struct Clientp{ //For each client
             bytes_sent = send(ConnectFD, send_buffer.data() + bytes_sent, bytes_to_send, 0);
             if (bytes_sent < 0)
                 perror("ERROR writing to socket");
+            
+            if (bytes_sent == 0){
+                mtx.unlock();
+                disconnected = true;
+                return;
+            }
             bytes_to_send -= bytes_sent;
         }
-        mtx.unlock();
     }
     void recv_request(){ //Receive request from client
 
-        mtx2.lock();
-        recv_buffer.clear();
+        recv_buffer.resize(0);
+        recv_buffer.shrink_to_fit();
+
         memset(recv_size, 0, 11);
 
         int n = recv(ConnectFD, recv_size, 10, 0);
         if (n < 0)
             perror("ERROR reading from socket");
-        int resp_size = stoi(recv_size);
+
+        if (n == 0){
+            disconnected = true;
+            return;
+        }
+        int resp_size;
+        
+        if (n == 10){
+            resp_size = stoi(recv_size);
+        } else return;
+
         while(resp_size > 0){
             memset(tmp_recv, 0, SIZE);
             n = recv(ConnectFD, tmp_recv, resp_size, 0);
             if (n < 0)
                 perror("ERROR reading from socket");
-            
+            if (n == 0){
+                disconnected = true;
+                return;
+            }
             recv_buffer.insert(recv_buffer.end(), tmp_recv, tmp_recv+n);
             resp_size -= n;
         }
         // Load recv_buffer into ss stringstream
-        ss.clear();
+        ss.str("");
         ss.write((char*)recv_buffer.data(), recv_buffer.size());
-        mtx2.unlock();
     }
 
     void send_notification(string notification){
@@ -101,6 +119,10 @@ struct Clientp{ //For each client
         size_notification << setw(2) << setfill('0') << notification.size();
         string send_str = "N" + size_notification.str() + notification;
         send_response(send_str);
+    }
+
+    bool is_connected(){
+        return !disconnected;
     }
 };
 

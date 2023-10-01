@@ -17,6 +17,7 @@
 #include <cctype>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
 #include <ctime>
 #include <functional>
 #include "connection.h"
@@ -24,19 +25,24 @@
 using namespace std;
 int SocketFD = socket(AF_INET, SOCK_STREAM, 0); // IPPROTO_TCP
 
-void thread_reader(Connection &conn){
-  while(!conn.disconnected){
-    conn.recv_and_decode();
-  }
-}
-
 void thread_sender(Connection &conn){
   string usr_input;
-  while(!conn.disconnected){
+  while(conn.is_connected()){
     getline(cin, usr_input);
-    conn.encoding(usr_input);
     cin.clear();
+    conn.encoding(usr_input);
   }
+  conn.close_connection();
+  exit(EXIT_SUCCESS);
+}
+
+void verify_connection(Connection &conn){
+  while(conn.is_connected()){
+    this_thread::sleep_for(chrono::seconds(1));
+    cout << "Verifying connection..." << endl;
+  }
+  conn.close_connection();
+  exit(EXIT_SUCCESS);
 }
 
 bool validate_nickname(string nickname, unsigned char buff[SIZE]){
@@ -114,7 +120,7 @@ int main(int argc, char *argv[]){
   // Getting a nickname no repeated
   char nickname[50];
   do{
-    bzero(nickname, 50); 
+    bzero(nickname, 50);
     printf("Enter an username no repeated: ");
     fgets(nickname, 49, stdin);
     nickname[strcspn(nickname, "\n")] = '\0';
@@ -127,9 +133,12 @@ int main(int argc, char *argv[]){
   
   Connection conn(SocketFD);
 
-  thread reader = thread(thread_reader, ref(conn));
-  thread sender = thread(thread_sender, ref(conn));
-  reader.join();
-  sender.join();
+  thread(thread_sender, ref(conn)).detach();
+  //thread(thread(verify_connection, ref(conn))).detach();
+
+  while(conn.is_connected()){
+    conn.recv_and_decode();
+  }
+  conn.close_connection();
   return 0;
 }

@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <cstdio>
@@ -34,15 +35,15 @@ struct Connection{
     unsigned char tmp_recv[SIZE];
     char recv_size[11];
     string size_nickname;
-    bool disconnected;
     stringstream ss, ss2; // ss is for sending, ss2 is for receiving
     char type;
+    bool disconnected;
     ifstream infile;
     ofstream outfile;
 
     Connection(int SocketFD){
         this->SocketFD = SocketFD;
-        disconnected = false;
+        this->disconnected = false;
     }
     void send_request(string send_str){ //Send request to server by send_buff with send_str
         vector<unsigned char> os;
@@ -51,9 +52,10 @@ struct Connection{
     }
 
     void send_request(vector<unsigned char> &send_vect){ //Send request to server by send_buff with send_vect
-        
+    
         mtx.lock(); // Critical section: encoding and decoding use this function, the two functions are called in different threads
-        send_buff.clear();
+        send_buff.resize(0);
+        send_buff.shrink_to_fit();
 
         ostringstream send_buff_size;
         send_buff_size << setw(10) << setfill('0') << send_vect.size();
@@ -66,6 +68,11 @@ struct Connection{
             bytes_sent = send(SocketFD, send_buff.data() + bytes_sent, bytes_to_send, 0);
             if (bytes_sent < 0)
                 perror("ERROR writing to socket");
+            if (bytes_sent == 0){ // Socket blocking mode: 0 = disconnected
+                mtx.unlock();
+                disconnected = true;
+                return;
+            }
             bytes_to_send -= bytes_sent;
         }
         mtx.unlock();
@@ -74,38 +81,49 @@ struct Connection{
 
     void recv_and_decode(){ //Load response to recv_buff
         
-        recv_buff.clear();
+        recv_buff.resize(0);
+        recv_buff.shrink_to_fit();
         memset(recv_size, 0, 11);
 
         int n = recv(SocketFD, recv_size, 10, 0);
         if (n < 0)
             perror("ERROR reading from socket");
-
+        if (n == 0){
+            disconnected = true;
+            return;
+        }
         int resp_size = stoi(recv_size);
+
         while(resp_size > 0){
             bzero(tmp_recv, SIZE);
             n = recv(SocketFD, tmp_recv, resp_size, 0);
             if (n < 0)
                 perror("ERROR reading from socket");
-            
+            if (n == 0){
+                disconnected = true;
+                return;
+            }
             recv_buff.insert(recv_buff.end(), tmp_recv, tmp_recv+n);
             resp_size -= n;
         }
-        for (int i = 0; i < recv_buff.size(); i++){
-            cout << recv_buff[i];
-        } cout << endl;
+
         send_confirmation(recv_buff.size());
         decoding();
     }
     // Encoding functions
-    void encoding(string input){ //Encoding the user input and send it to the server
+    void encoding(string &input){ //Encoding the user input and send it to the server
         // input : type,[content]
+        if (input.size() == 0){
+            cout << "Invalid input" << endl;
+            return;
+        }
+        
+        ss.str("");
         ss.clear();
-        ss.write(input.c_str(), input.size());
+        ss.str(input);
         ss >> type;
-        // Ignore the comma after the type
-        char cm; ss >> cm;
-
+        char cm; ss >> cm; // Ignore the comma after the type
+        
         type = tolower(type);
 
         if (type == 'n'){ //Change nickname request
@@ -137,7 +155,6 @@ struct Connection{
         }
         else if (type == 'q'){ //Quit: Disconnect request
             string send_str = "Q00";
-            disconnected = true;
             send_request(send_str);
         }
         else if (type == 'c'){ //Clear screen
@@ -150,7 +167,7 @@ struct Connection{
     string get_hash(vector<unsigned char> &buffer, int buff_size){
         // Hash value is only the sum of the ASCII characters of the message
         ostringstream hash_value;
-        int hash;
+        int hash = 0;
         for (int i = 0; i < buff_size; i++){
             hash += buffer[i];
         }
@@ -265,6 +282,7 @@ struct Connection{
     // Decoding functions
     void decoding(){ // Decoding the response and process it
         // recv_buff : type[Content]
+        ss2.str("");
         ss2.clear();
         ss2.write((char *)recv_buff.data(), recv_buff.size());
         char type;
@@ -335,11 +353,14 @@ struct Connection{
 
         ss2.read(filename_size.data(), filename_size.size());
         string filename(stoi(filename_size), '0');
+        ss2.read(filename.data(), filename.size());
+        
+        ss2.read(file_size.data(), file_size.size());
         vector<unsigned char> file(stoi(file_size));
         ss2.read((char *)file.data(), file.size());
 
         ss2.read(hash_data_rcv.data(), hash_data_rcv.size());
-        string hash_data_calc = get_hash(file, stoi(file_size));
+        string hash_data_calc = get_hash(file, file.size());
         string datetime_rcv = get_datetime();
 
         // TODO: Check hash data
@@ -348,7 +369,7 @@ struct Connection{
             outfile.open("out/" + filename, ios::binary);
             outfile.write((char *)file.data(), file.size());
             outfile.close();
-            cout << "File " << filename << " received with hash: " << hash_data_calc << endl;
+            cout << "File received from " << sender << ": " << filename << endl;
         } catch (exception &e){
             cout << "ERROR: " << e.what() << endl;
         }
@@ -401,6 +422,15 @@ struct Connection{
         for (auto str: names){
         cout << "- " << str << endl; 
         }
+    }
+    bool is_connected() {
+        return !disconnected;
+    }
+    void close_connection(){
+        shutdown(SocketFD, SHUT_RDWR);
+        close(SocketFD);
+        system("clear || cls");
+        cout << "Connection closed" << endl;
     }
 };
 
