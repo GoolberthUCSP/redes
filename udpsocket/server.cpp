@@ -29,9 +29,16 @@ using namespace std;
 
 map<string, struct sockaddr_in> online_clients;
 
-void processing(int &socketFD, string buffer, struct sockaddr_in &client_addr);
-void send_message(int &socketFD, stringstream &ss);
+typedef void (*func_ptr)(int&, stringstream&, struct sockaddr_in);
+
+void processing(int &socketFD, string buffer, struct sockaddr_in client_addr);
+void send_message(int &socketFD, stringstream &ss, struct sockaddr_in client_addr);
 void save_client(int &socketFD, stringstream &ss, struct sockaddr_in client_addr);
+
+map<char, func_ptr> functions({
+    {'N', &save_client},
+    {'M', &send_message}
+});
 
 int main(){
     int bytes_readed;
@@ -65,21 +72,18 @@ int main(){
 }
 
 
-void processing(int &socketFD, string buffer, struct sockaddr_in &client_addr){
+void processing(int &socketFD, string buffer, struct sockaddr_in client_addr){
     stringstream ss(buffer);
     char type;
     ss >> type;
-    if (type == 'N'){
-        // N00nickname
-        save_client(socketFD, ss, client_addr);        
+    if (functions.find(type) == functions.end()){
+        cout << "Bad type" << endl;
+        return;
     }
-    else if (type == 'M'){
-        // M00receiver000message
-        send_message(socketFD, ss);
-    }      
+    functions[type](socketFD, ss, client_addr);
 }
 
-void send_message(int &socketFD, stringstream &ss){
+void send_message(int &socketFD, stringstream &ss, struct sockaddr_in client_addr){
     // ss : 00receiver000message
     string size_rcv(2, '0');
     ss.read(size_rcv.data(), size_rcv.size());

@@ -21,6 +21,7 @@
 #include <chrono>
 #include <ctime>
 #include <functional>
+#include <map>
 
 #define SIZE 1024
 
@@ -32,12 +33,26 @@ struct Server{
     Server(int &socketFD, struct sockaddr_in &server_addr) : socketFD(socketFD), server_addr(server_addr) {}
 };
 
-string send_message(stringstream &ss);
-string send_nickname(stringstream &ss);
-void recv_message(stringstream &ss);
 string encoding(string &buffer);
 void decoding(string buffer);
 void thread_receiver(Server &server);
+// Send functions
+string send_message(stringstream &ss);
+string send_nickname(stringstream &ss);
+// Receive functions
+void recv_message(stringstream &ss);
+
+typedef string (*send_ptr)(stringstream&);
+typedef void (*recv_ptr)(stringstream&);
+
+map<string, send_ptr> send_functions({
+    {"soy", &send_nickname},
+    {"send", &send_message}
+});
+
+map<char, recv_ptr> recv_functions({
+    {'M', &recv_message}
+});
 
 int main(){
     int socketFD;
@@ -76,6 +91,10 @@ int main(){
         }
         
         string encoded = encoding(usr_input);
+        if (encoded == ""){
+            cout << "Bad input" << endl;
+            continue;
+        }
         sendto(socketFD, encoded.c_str(), encoded.size(), 0, (struct sockaddr *)&server_addr, addr_len);
     }
 }
@@ -95,9 +114,11 @@ void decoding(string buffer){
     char type;
     ss >> type;
     
-    if (type == 'M'){
-        recv_message(ss);
+    if (recv_functions.find(type) == recv_functions.end()){
+        cout << "Bad type" << endl;
+        return;
     }
+    recv_functions[type](ss);
 }
 
 string encoding(string &buffer){
@@ -107,14 +128,11 @@ string encoding(string &buffer){
     getline(ss, action, ' ');
     transform(action.begin(), action.end(), action.begin(), ::tolower);
 
-    if (action == "send"){
-        // send receiver message
-        return send_message(ss);
+    if (send_functions.find(action) == send_functions.end()){
+        return "";
     }
-    else if (action == "soy"){
-        // soy nickname
-        return send_nickname(ss);
-    }
+    encoded = send_functions[action](ss);
+    return encoded;
 }
 
 string send_message(stringstream &ss){
