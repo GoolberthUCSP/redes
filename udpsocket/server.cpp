@@ -22,6 +22,8 @@
 #include <random>
 #include <utility>
 #include <algorithm>
+#include <thread>
+#include "myclass.h"
 
 #define SIZE 1024
 
@@ -29,23 +31,25 @@ using namespace std;
 
 map<string, struct sockaddr_in> online_clients;
 
-typedef void (*func_ptr)(int&, stringstream&, struct sockaddr_in);
+typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
 
-void processing(int &socketFD, string buffer, struct sockaddr_in client_addr);
-void send_message(int &socketFD, stringstream &ss, struct sockaddr_in client_addr);
-void save_client(int &socketFD, stringstream &ss, struct sockaddr_in client_addr);
+void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr);
+void send_message(stringstream &ss, struct sockaddr_in client_addr);
+void save_client(stringstream &ss, struct sockaddr_in client_addr);
+void process_struct(stringstream &ss, struct sockaddr_in client_addr);
 
+int socketFD;
 map<char, func_ptr> functions({
     {'N', &save_client},
-    {'M', &send_message}
+    {'M', &send_message},
+    {'P', &process_struct}
 });
 
 int main(){
     int bytes_readed;
-    char recv_buffer[SIZE];
+    vector<unsigned char> recv_buffer(SIZE);
     struct sockaddr_in server_addr , client_addr;
     int addr_len= sizeof(struct sockaddr_in);
-    int socketFD;
 
     if ((socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
         perror("Socket");
@@ -64,26 +68,27 @@ int main(){
 	cout << "UDPServer Waiting for client on port 5000..." << endl;
     
     while(true){
-        memset(&recv_buffer, 0, sizeof(recv_buffer));
-        bytes_readed = recvfrom(socketFD, recv_buffer, SIZE, MSG_WAITALL, (struct sockaddr *)&client_addr, (socklen_t *)&addr_len);
+        memset(recv_buffer.data(), 0, SIZE);
+        bytes_readed = recvfrom(socketFD, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&client_addr, (socklen_t *)&addr_len);
         cout << "Received " << bytes_readed << "B from " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << endl;
-        processing(socketFD, recv_buffer, client_addr);
+        thread(processing, recv_buffer, client_addr).detach();
     }
 }
 
 
-void processing(int &socketFD, string buffer, struct sockaddr_in client_addr){
-    stringstream ss(buffer);
+void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr){
+    stringstream ss;
+    ss.write((char *)buffer.data(), buffer.size());
     char type;
     ss >> type;
     if (functions.find(type) == functions.end()){
         cout << "Bad type" << endl;
         return;
     }
-    functions[type](socketFD, ss, client_addr);
+    functions[type](ss, client_addr);
 }
 
-void send_message(int &socketFD, stringstream &ss, struct sockaddr_in client_addr){
+void send_message(stringstream &ss, struct sockaddr_in client_addr){
     // ss : 00receiver000message
     string size_rcv(2, '0');
     ss.read(size_rcv.data(), size_rcv.size());
@@ -104,7 +109,7 @@ void send_message(int &socketFD, stringstream &ss, struct sockaddr_in client_add
     cout << "Message sent to " << receiver << ": " << message << endl;
 }
 
-void save_client(int &socketFD, stringstream &ss, struct sockaddr_in client_addr){
+void save_client(stringstream &ss, struct sockaddr_in client_addr){
     // ss : 00nickname
     string nick_size(2, '0');
     ss.read(nick_size.data(), nick_size.size());
@@ -112,4 +117,14 @@ void save_client(int &socketFD, stringstream &ss, struct sockaddr_in client_addr
     ss.read(nickname.data(), nickname.size());
     online_clients[nickname] = client_addr;
     cout << "Client saved: " << nickname << endl;
+}
+
+void process_struct(stringstream &ss, struct sockaddr_in client_addr){
+    // ss : data_struct
+    int size= sizeof(MyClass);
+    vector<unsigned char> data(size);
+    ss.read((char *)data.data(), size);
+    MyClass myclass;
+    memcpy(&myclass, data.data(), size);
+    cout << "Struct received: " << myclass << endl;
 }

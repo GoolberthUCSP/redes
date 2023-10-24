@@ -22,6 +22,7 @@
 #include <ctime>
 #include <functional>
 #include <map>
+#include "myclass.h"
 
 #define SIZE 1024
 
@@ -33,21 +34,23 @@ struct Server{
     Server(int &socketFD, struct sockaddr_in &server_addr) : socketFD(socketFD), server_addr(server_addr) {}
 };
 
-string encoding(string &buffer);
-void decoding(string buffer);
+vector<unsigned char> encoding(string &buffer);
+void decoding(vector<unsigned char> buffer);
 void thread_receiver(Server &server);
 // Send functions
-string send_message(stringstream &ss);
-string send_nickname(stringstream &ss);
+vector<unsigned char> send_message(stringstream &ss);
+vector<unsigned char> send_nickname(stringstream &ss);
+vector<unsigned char> send_struct(stringstream &ss);
 // Receive functions
 void recv_message(stringstream &ss);
 
-typedef string (*send_ptr)(stringstream&);
+typedef vector<unsigned char> (*send_ptr)(stringstream&);
 typedef void (*recv_ptr)(stringstream&);
 
 map<string, send_ptr> send_functions({
     {"soy", &send_nickname},
-    {"send", &send_message}
+    {"send", &send_message},
+    {"struct", &send_struct}
 });
 
 map<char, recv_ptr> recv_functions({
@@ -90,27 +93,28 @@ int main(){
             continue;
         }
         
-        string encoded = encoding(usr_input);
-        if (encoded == ""){
+        vector<unsigned char> encoded = encoding(usr_input);
+        if (encoded.size() == 0){
             cout << "Bad input" << endl;
             continue;
         }
-        sendto(socketFD, encoded.c_str(), encoded.size(), 0, (struct sockaddr *)&server_addr, addr_len);
+        sendto(socketFD, encoded.data(), encoded.size(), 0, (struct sockaddr *)&server_addr, addr_len);
     }
 }
 
 void thread_receiver(Server &server){
-    char recv_buffer[SIZE];
+    vector<unsigned char> recv_buffer(SIZE);
     int bytes_readed, addr_len= sizeof(struct sockaddr_in);
     while(true){
-        memset(&recv_buffer, 0, sizeof(recv_buffer));
-        bytes_readed = recvfrom(server.socketFD, recv_buffer, SIZE, 0, (struct sockaddr *)&server.server_addr, (socklen_t *)&addr_len);
+        memset(recv_buffer.data(), 0, SIZE);
+        bytes_readed = recvfrom(server.socketFD, recv_buffer.data(), SIZE, 0, (struct sockaddr *)&server.server_addr, (socklen_t *)&addr_len);
         decoding(recv_buffer);
     }   
 }
 
-void decoding(string buffer){
-    stringstream ss(buffer);
+void decoding(vector<unsigned char> buffer){
+    stringstream ss;
+    ss.write((char *)buffer.data(), buffer.size());
     char type;
     ss >> type;
     
@@ -121,21 +125,21 @@ void decoding(string buffer){
     recv_functions[type](ss);
 }
 
-string encoding(string &buffer){
-    stringstream ss;
-    ss.str(buffer);
-    string action, encoded;
+vector<unsigned char> encoding(string &buffer){
+    stringstream ss(buffer);
+    string action;
+    vector<unsigned char> encoded;
     getline(ss, action, ' ');
     transform(action.begin(), action.end(), action.begin(), ::tolower);
 
     if (send_functions.find(action) == send_functions.end()){
-        return "";
+        return {};
     }
     encoded = send_functions[action](ss);
     return encoded;
 }
 
-string send_message(stringstream &ss){
+vector<unsigned char> send_message(stringstream &ss){
     // ss : receiver message
     string receiver, message;
     getline(ss, receiver, ' ');
@@ -143,16 +147,38 @@ string send_message(stringstream &ss){
     ostringstream size_receiver, size_message;
     size_receiver << setw(2) << setfill('0') << receiver.size();
     size_message << setw(3) << setfill('0') << message.size();
-    return "M" + size_receiver.str() + receiver + size_message.str() + message;
+    string out_str = "M" + size_receiver.str() + receiver + size_message.str() + message;
+    vector<unsigned char> out(out_str.size());
+    copy(out_str.begin(), out_str.end(), out.begin());
+    return out;
 }
 
-string send_nickname(stringstream &ss){
+vector<unsigned char> send_nickname(stringstream &ss){
     // ss :nickname
     string nickname;
     getline(ss, nickname, '\0');
     ostringstream size;
     size << setw(2) << setfill('0') << nickname.size();
-    return "N" + size.str() + nickname;
+    string out_str = "N" + size.str() + nickname;
+    vector<unsigned char> out(out_str.size());
+    copy(out_str.begin(), out_str.end(), out.begin());
+    return out;
+}
+
+vector<unsigned char> send_struct(stringstream &ss){
+    // ss : number long
+    string number, longint;
+    getline(ss, number, ' ');
+    getline(ss, longint, '\0');
+    MyClass myclass;
+    myclass.num = stoi(number);
+    myclass.longint = stol(longint);
+    string struct_str(sizeof(myclass), '0');
+    memcpy(struct_str.data(), &myclass, sizeof(myclass));
+    struct_str= "P" + struct_str;
+    vector<unsigned char> out(struct_str.size()+1);
+    copy(struct_str.begin(), struct_str.end(), out.begin());
+    return out;
 }
 
 void recv_message(stringstream &ss){
