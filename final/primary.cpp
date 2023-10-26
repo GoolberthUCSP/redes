@@ -37,6 +37,8 @@ vector<struct sockaddr_in> storages_addr(4);
 
 typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
 
+void init_storages();
+void verify_storage(int n_storage);
 void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr);
 void send_message(stringstream &ss, struct sockaddr_in client_addr);
 void save_client(stringstream &ss, struct sockaddr_in client_addr);
@@ -68,24 +70,58 @@ int main(){
         exit(1);
     }
 	cout << "UDPServer Waiting for client on port 5000..." << endl;
-    
+    //Initialize storages
+    init_storages();
+
     while(true){
         memset(recv_buffer.data(), 0, SIZE);
-        bytes_readed = recvfrom(primary_addr, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&client_addr, (socklen_t *)&addr_len);
+        bytes_readed = recvfrom(primaryFD, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&client_addr, (socklen_t *)&addr_len);
+        
         cout << "Received " << bytes_readed << "B from " << inet_ntoa(client_addr.sin_addr) << ":" << ntohs(client_addr.sin_port) << endl;
+        
+        stringstream ss;
+        ss.write((char *)recv_buffer.data(), recv_buffer.size());
+        string seq_num(2, 0), hash(6, 0), type(1, 0), msg_id(3, 0), flag(1, 0);
+        ss.read(seq_num.data(), seq_num.size());
+        ss.read(hash.data(), hash.size());
+        ss.read(type.data(), type.size());
+        ss.read(msg_id.data(), msg_id.size());
+        ss.read(flag.data(), flag.size());
+        // Verify if flag = 1 (incomplete) else (complete)
+        
         thread(processing, recv_buffer, client_addr).detach();
     }
 }
 
 
 void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr){
-    stringstream ss;
-    ss.write((char *)buffer.data(), buffer.size());
-    char type;
-    ss >> type;
+    
+
     if (functions.find(type) == functions.end()){
-        cout << "Bad type" << endl;
+        cout << "Bad type, not processed" << endl;
         return;
     }
     functions[type](ss, client_addr);
 }
+
+void verify_storage(int n_storage){
+    return;
+}
+
+void init_storages(){
+    for (int i=0; i<4; i++){
+        if ((storageFDs[i] = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+            perror("Storage socket");
+            exit(1);
+        }
+        memset(&storages_addr[i], 0, sizeof(storages_addr[i]));
+        storages_addr[i].sin_family = AF_INET;
+        storages_addr[i].sin_port = htons(storage_port[i]);
+        if (inet_pton(AF_INET, "127.0.0.1", &storages_addr[i].sin_addr) == -1){
+            perror("Storage inet_pton");
+            exit(1);
+        }
+    }
+}
+
+
