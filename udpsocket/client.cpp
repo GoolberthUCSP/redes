@@ -28,38 +28,43 @@
 
 using namespace std;
 
-struct Server{
-    int socketFD;
-    struct sockaddr_in server_addr;
-    Server(int &socketFD, struct sockaddr_in &server_addr) : socketFD(socketFD), server_addr(server_addr) {}
+string nickname;
+string nick_size;
+int socketFD;
+struct sockaddr_in server_addr;
+// Game: stone, paper, scissors
+map<string,int> game_state{
+    {"piedra", 0},
+    {"papel", 1},
+    {"tijera", 2}
 };
 
 vector<unsigned char> encoding(string &buffer);
 void decoding(vector<unsigned char> buffer);
-void thread_receiver(Server &server);
+void thread_receiver();
 // Send functions
 vector<unsigned char> send_message(stringstream &ss);
-vector<unsigned char> send_nickname(stringstream &ss);
 vector<unsigned char> send_struct(stringstream &ss);
+vector<unsigned char> send_game(stringstream &ss);
 // Receive functions
 void recv_message(stringstream &ss);
+void recv_notification(stringstream &ss);
 
 typedef vector<unsigned char> (*send_ptr)(stringstream&);
 typedef void (*recv_ptr)(stringstream&);
 
 map<string, send_ptr> send_functions({
-    {"soy", &send_nickname},
     {"send", &send_message},
-    {"struct", &send_struct}
+    {"struct", &send_struct},
+    {"game", &send_game}
 });
 
 map<char, recv_ptr> recv_functions({
-    {'M', &recv_message}
+    {'M', &recv_message},
+    {'N', &recv_notification}
 });
 
 int main(){
-    int socketFD;
-    struct sockaddr_in server_addr;
     char recv_buffer[SIZE];
     int addr_len= sizeof(struct sockaddr_in);
 
@@ -76,9 +81,14 @@ int main(){
         exit(1);
     }
 
-    Server server(socketFD, server_addr);
+    cout << "Ingrese su nickname: ";
+    getline(cin, nickname);
+    cin.clear();
+    ostringstream sz;
+    sz << setw(2) << setfill('0') << nickname.size();
+    nick_size = sz.str();
 
-    thread(thread_receiver, ref(server)).detach();
+    thread(thread_receiver).detach();
 
     while(true){ // Wait for user input, encoding and sending to server
         string usr_input;
@@ -95,19 +105,19 @@ int main(){
         
         vector<unsigned char> encoded = encoding(usr_input);
         if (encoded.size() == 0){
-            cout << "Bad input" << endl;
+            cout << "Bad input, try again" << endl;
             continue;
         }
         sendto(socketFD, encoded.data(), encoded.size(), 0, (struct sockaddr *)&server_addr, addr_len);
     }
 }
 
-void thread_receiver(Server &server){
+void thread_receiver(){
     vector<unsigned char> recv_buffer(SIZE);
     int bytes_readed, addr_len= sizeof(struct sockaddr_in);
     while(true){
         memset(recv_buffer.data(), 0, SIZE);
-        bytes_readed = recvfrom(server.socketFD, recv_buffer.data(), SIZE, 0, (struct sockaddr *)&server.server_addr, (socklen_t *)&addr_len);
+        bytes_readed = recvfrom(socketFD, recv_buffer.data(), SIZE, 0, (struct sockaddr *)&server_addr, (socklen_t *)&addr_len);
         decoding(recv_buffer);
     }   
 }
@@ -147,19 +157,7 @@ vector<unsigned char> send_message(stringstream &ss){
     ostringstream size_receiver, size_message;
     size_receiver << setw(2) << setfill('0') << receiver.size();
     size_message << setw(3) << setfill('0') << message.size();
-    string out_str = "M" + size_receiver.str() + receiver + size_message.str() + message;
-    vector<unsigned char> out(out_str.size());
-    copy(out_str.begin(), out_str.end(), out.begin());
-    return out;
-}
-
-vector<unsigned char> send_nickname(stringstream &ss){
-    // ss :nickname
-    string nickname;
-    getline(ss, nickname, '\0');
-    ostringstream size;
-    size << setw(2) << setfill('0') << nickname.size();
-    string out_str = "N" + size.str() + nickname;
+    string out_str = "M" + nick_size + nickname + size_receiver.str() + receiver + size_message.str() + message;
     vector<unsigned char> out(out_str.size());
     copy(out_str.begin(), out_str.end(), out.begin());
     return out;
@@ -181,11 +179,37 @@ vector<unsigned char> send_struct(stringstream &ss){
     return out;
 }
 
+vector<unsigned char> send_game(stringstream &ss){
+    // ss : state
+    string state;
+    getline(ss, state, '\0');
+    if (game_state.find(state) == game_state.end()){
+        cout << "Bad state" << endl;
+        return {};
+    }
+    string out_str = "G" + nick_size + nickname + state;
+    vector<unsigned char> out(out_str.size());
+    copy(out_str.begin(), out_str.end(), out.begin());
+    return out;
+}
+
 void recv_message(stringstream &ss){
-    // ss : 000message
-    string size(3, '0');
-    ss.read(size.data(), size.size());
-    string message(stoi(size), '0');
+    // ss : 00sender000message
+    string size_sdr(2, '0'), size_msg(3, '0');
+    ss.read(size_sdr.data(), size_sdr.size());
+    string sender(stoi(size_sdr), '0');
+    ss.read(sender.data(), sender.size());
+    ss.read(size_msg.data(), size_msg.size());
+    string message(stoi(size_msg), '0');
     ss.read(message.data(), message.size());
-    cout << "Message received: " << message << endl;    
+    cout << "Message received from " << sender << ": " << message << endl;    
+}
+
+void recv_notification(stringstream &ss){
+    // ss : 00notification
+    string size(2, '0');
+    ss.read(size.data(), size.size());
+    string notification(stoi(size), '0');
+    ss.read(notification.data(), notification.size());
+    cout << "Notification received: " << notification << endl;
 }
