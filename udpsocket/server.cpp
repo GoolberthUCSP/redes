@@ -29,25 +29,18 @@
 
 using namespace std;
 
+int socketFD;
 map<string, struct sockaddr_in> online_clients;
-// Game: stone, paper, scissors
-map<int, string> game_state{
-    {0, "piedra"},
-    {1, "papel"},
-    {2, "tijera"}
-};
+State *first_gamer = nullptr;
 
-pair<string, int> *first_gamer= nullptr;
-
-typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
+typedef void (*func_ptr)(stringstream&, string);
 
 void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr);
-void send_message(stringstream &ss, struct sockaddr_in client_addr);
-void process_struct(stringstream &ss, struct sockaddr_in client_addr);
-void process_game(stringstream &ss, struct sockaddr_in client_addr);
-void send_notification(struct sockaddr_in client_addr, string message);
+void send_message(stringstream &ss, string sender);
+void process_struct(stringstream &ss, string sender);
+void process_game(stringstream &ss, string sender);
+void send_notification(string nickname, string message);
 
-int socketFD;
 map<char, func_ptr> functions({
     {'M', &send_message},
     {'P', &process_struct},
@@ -94,21 +87,23 @@ void processing(vector<unsigned char> buffer, struct sockaddr_in client_addr){
         cout << "Bad type" << endl;
         return;
     }
-    functions[type](ss, client_addr);
-}
-
-void send_message(stringstream &ss, struct sockaddr_in client_addr){
-    // ss : 00sender00receiver000message
     string size_sdr(2, '0'), size_rcv(2, '0'), size_msg(3, '0');
     ss.read(size_sdr.data(), size_sdr.size());
     string sender(stoi(size_sdr), '0');
     ss.read(sender.data(), sender.size());
 
-    if (online_clients.find(sender) != online_clients.end()){ // Validation if sender is not registered
+    if (online_clients.find(sender) == online_clients.end()){ // Validation if sender is not registered
         online_clients[sender] = client_addr;
         cout << "Client registered: " << sender << endl;
     }
 
+    functions[type](ss, sender);
+}
+
+void send_message(stringstream &ss, string sender){
+    // ss : 00receiver000message
+    string size_rcv(2, '0'), size_msg(3, '0');
+    
     ss.read(size_rcv.data(), size_rcv.size());
     string receiver(stoi(size_rcv), '0');
     ss.read(receiver.data(), receiver.size());
@@ -121,12 +116,14 @@ void send_message(stringstream &ss, struct sockaddr_in client_addr){
         cout << "User " << receiver << " is not online. Message not sent" << endl;
         return;
     }
-    string msg = "M" + size_sdr + sender + size_msg + message;
+    ostringstream size_sdr;
+    size_sdr << setw(2) << setfill('0') << sender.size();
+    string msg = "M" + size_sdr.str() + sender + size_msg + message;
     sendto(socketFD, msg.c_str(), msg.size(), MSG_CONFIRM, (struct sockaddr *)&online_clients[receiver], sizeof(struct sockaddr));
     cout << "Message sent to " << receiver << ": " << message << endl;
 }
 
-void process_struct(stringstream &ss, struct sockaddr_in client_addr){
+void process_struct(stringstream &ss, string sender){
     // ss : data_struct
     int size= sizeof(MyClass);
     vector<unsigned char> data(size);
@@ -136,35 +133,40 @@ void process_struct(stringstream &ss, struct sockaddr_in client_addr){
     cout << "Struct received: " << myclass << endl;
 }
 
-void process_game(stringstream &ss, struct sockaddr_in client_addr){
-    // ss : 00sender(1B state)
-    string size_sdr(2, '0');
-    ss.read(size_sdr.data(), size_sdr.size());
-    string sender(stoi(size_sdr), '0');
-    ss.read(sender.data(), sender.size());
-    string state(1, '0');
+void process_game(stringstream &ss, string sender){
+    // ss : (6B state)
+    
+    string state(6, '0');
     ss.read(state.data(), state.size());
+
+    if (state == "papel_") state = "papel";
+    
     if (first_gamer == nullptr){
-        first_gamer = new pair<string, int>(sender, stoi(state));
+        first_gamer = new State(sender, state);
+        send_notification(sender, "Done, wait for the next game.");
     }
     else {
-        if (stoi(state) == first_gamer->second){
-            string out_str= "It's a draw";
-            send_notification(client_addr, out_str);
-            send_notification(online_clients[first_gamer->first], out_str);
-            return;
+        if (state == first_gamer->state){
+            string out_str= "It's a draw.";
+            send_notification(sender, out_str);
+            send_notification(first_gamer->nickname, out_str);
         }
         else {
-            string winner = ()
+            State second(sender, state);
+            State winner = first_gamer->winner(second);
+            State loser = first_gamer->loser(second);
+            string out_str = "Winner:" + winner.str() + ", Loser:" + loser.str();
+            send_notification(winner.nickname, out_str); 
+            send_notification(loser.nickname, out_str);
         }
         first_gamer = nullptr;
     }
 }
 
-void send_notification(struct sockaddr_in client_addr, string message){
+void send_notification(string nickname, string message){
     // out : N00message
     ostringstream size;
     size << setw(2) << setfill('0') << message.size();
     string out_str = "N" + size.str() + message;
-    sendto(socketFD, out_str.c_str(), out_str.size(), MSG_CONFIRM, (struct sockaddr *)&client_addr, sizeof(struct sockaddr));
+    sendto(socketFD, out_str.c_str(), out_str.size(), MSG_CONFIRM, (struct sockaddr *)&online_clients[nickname], sizeof(struct sockaddr));
 }

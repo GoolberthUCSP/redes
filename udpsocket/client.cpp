@@ -22,6 +22,7 @@
 #include <ctime>
 #include <functional>
 #include <map>
+#include <set>
 #include "myclass.h"
 
 #define SIZE 1024
@@ -32,16 +33,12 @@ string nickname;
 string nick_size;
 int socketFD;
 struct sockaddr_in server_addr;
-// Game: stone, paper, scissors
-map<string,int> game_state{
-    {"piedra", 0},
-    {"papel", 1},
-    {"tijera", 2}
-};
+set<string> states{"piedra", "papel", "tijera"};
 
 vector<unsigned char> encoding(string &buffer);
 void decoding(vector<unsigned char> buffer);
 void thread_receiver();
+vector<unsigned char> format_packet(string type, vector<unsigned char> data);
 // Send functions
 vector<unsigned char> send_message(stringstream &ss);
 vector<unsigned char> send_struct(stringstream &ss);
@@ -104,6 +101,7 @@ int main(){
         }
         
         vector<unsigned char> encoded = encoding(usr_input);
+
         if (encoded.size() == 0){
             cout << "Bad input, try again" << endl;
             continue;
@@ -157,10 +155,10 @@ vector<unsigned char> send_message(stringstream &ss){
     ostringstream size_receiver, size_message;
     size_receiver << setw(2) << setfill('0') << receiver.size();
     size_message << setw(3) << setfill('0') << message.size();
-    string out_str = "M" + nick_size + nickname + size_receiver.str() + receiver + size_message.str() + message;
+    string out_str = size_receiver.str() + receiver + size_message.str() + message;
     vector<unsigned char> out(out_str.size());
     copy(out_str.begin(), out_str.end(), out.begin());
-    return out;
+    return format_packet("M", out);
 }
 
 vector<unsigned char> send_struct(stringstream &ss){
@@ -173,24 +171,24 @@ vector<unsigned char> send_struct(stringstream &ss){
     myclass.longint = stol(longint);
     string struct_str(sizeof(myclass), '0');
     memcpy(struct_str.data(), &myclass, sizeof(myclass));
-    struct_str= "P" + struct_str;
+
     vector<unsigned char> out(struct_str.size()+1);
     copy(struct_str.begin(), struct_str.end(), out.begin());
-    return out;
+    return format_packet("P", out);
 }
 
 vector<unsigned char> send_game(stringstream &ss){
     // ss : state
     string state;
     getline(ss, state, '\0');
-    if (game_state.find(state) == game_state.end()){
+    if (!states.count(state)){
         cout << "Bad state" << endl;
         return {};
     }
-    string out_str = "G" + nick_size + nickname + state;
-    vector<unsigned char> out(out_str.size());
-    copy(out_str.begin(), out_str.end(), out.begin());
-    return out;
+    if (state == "papel") state += "_";
+    vector<unsigned char> out(sizeof(state));
+    copy(state.begin(), state.end(), out.begin());
+    return format_packet("G", out);
 }
 
 void recv_message(stringstream &ss){
@@ -212,4 +210,12 @@ void recv_notification(stringstream &ss){
     string notification(stoi(size), '0');
     ss.read(notification.data(), notification.size());
     cout << "Notification received: " << notification << endl;
+}
+
+vector<unsigned char> format_packet(string type, vector<unsigned char> data){
+    vector<unsigned char> out;
+    string header= type + nick_size + nickname;
+    out.insert(out.end(), header.begin(), header.end());
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
 }
