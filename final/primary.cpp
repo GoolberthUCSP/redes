@@ -23,6 +23,7 @@
 #include <utility>
 #include <algorithm>
 #include <thread>
+#include <set>
 #include "cache.h"
 #include "lib.h"
 
@@ -33,6 +34,7 @@ using namespace std;
 int primaryFD;
 vector<int> storage_port= {5001, 5002, 5003, 5004};
 Cache packets(100);
+set<string> acks_to_recv;
 
 struct sockaddr_in primary_addr, connect_addr;
 map<string, struct sockaddr_in> connects_addr;
@@ -40,6 +42,8 @@ map<string, struct sockaddr_in> connects_addr;
 typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
 
 void verify_storage(int n_storage);
+void send_packet();
+void resend_packet(string nickname, string seq_num);
 void replay_ack(string nickname, string seq_num, bool one_ack);
 void process_ack(string seq_num);
 void send_message(stringstream &ss, struct sockaddr_in connect_addr);
@@ -110,4 +114,26 @@ int main(){
 
 void verify_storage(int n_storage){
     return;
+}
+
+void replay_ack(string nickname, string seq_num, bool one_ack){
+    return;
+}
+
+void process_ack(string seq_num){
+    if (acks_to_recv.find(seq_num) == acks_to_recv.end()){
+        // If it's not in acks_to_recv, it means that it's second ACK with the same seq_num = NAK
+        resend_packet(seq_num);
+    }
+    else
+        acks_to_recv.erase(seq_num);
+}
+
+void send_packet(vector<unsigned char> packet, string nickname){
+    return;
+}
+
+void resend_packet(string nickname, string seq_num){
+    vector<unsigned char> packet = packets.get(stoi(seq_num));
+    send_packet(packet, nickname);
 }
