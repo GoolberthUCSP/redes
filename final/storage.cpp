@@ -21,6 +21,8 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <set>
+
 
 #define SIZE 1024
 
@@ -30,12 +32,10 @@ int socketFD;
 struct sockaddr_in primary_addr, this_addr;
 string nickname;
 
-map<string, vector<string>> database; // database[node]: {nodes that are connected to node}
+map<string, set<string>> database; // database[node]: {nodes that are connected to node}
 vector<int> storage_ports= {5001, 5002, 5003, 5004};
 vector<string> storage_nicknames= {"00", "01", "02", "03"};
 int nick_size = 2;
-
-typedef void (*func_ptr)(stringstream&);
 
 // CRUD request functions
 void create_request(stringstream &ss);
@@ -43,6 +43,7 @@ void read_request(stringstream &ss);
 void update_request(stringstream &ss);
 void delete_request(stringstream &ss);
 
+typedef void (*func_ptr)(stringstream&);
 map<char, func_ptr> crud_requests({
     {'C', &create_request},
     {'R', &read_request},

@@ -35,23 +35,25 @@ int primaryFD;
 vector<int> storage_port= {5001, 5002, 5003, 5004};
 Cache packets(100);
 set<string> acks_to_recv;
+map<string, vector<unsigned char>> incomplete_message; // msg_id, data
 
 struct sockaddr_in primary_addr, connect_addr;
-map<string, struct sockaddr_in> connects_addr;
+map<string, struct sockaddr_in> connects_addr; // nickname, addr
 
-typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
+struct Header{
+    string nickname;
+    string seq_num;
+    Header(string n, string s) : nickname(n), seq_num(s) {}
+};
 
 void verify_storage(int n_storage);
-void send_packet();
-void resend_packet(string nickname, string seq_num);
-void replay_ack(string nickname, string seq_num, bool one_ack);
-void process_ack(string seq_num);
-void send_message(stringstream &ss, struct sockaddr_in connect_addr);
-void process_struct(stringstream &ss, struct sockaddr_in connect_addr);
+void send_message(Header &header, string type, vector<unsigned char> data);
+void resend_packet(Header &header);
+void replay_ack(Header &header, bool one_ack);
+void process_ack(Header &header);
 
+typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
 map<char, func_ptr> process_functions({
-    {'M', &send_message},
-    {'P', &process_struct}
 });
 
 int main(){
@@ -94,21 +96,35 @@ int main(){
         ss.read(nick_size.data(), nick_size.size());
         string nickname(stoi(nick_size), 0);
         ss.read(nickname.data(), nickname.size());
+
+        vector<unsigned char> data(recv_buffer.size() - ss.tellg());
+        ss.read((char *)data.data(), data.size());
         
+        if (connects_addr.find(nickname) == connects_addr.end()){ // Validation if nickname is saved
+            connects_addr[nickname] = connect_addr;
+        }
+
+        Header header(nickname, seq_num);
         if (type == "A"){
-            process_ack(seq_num);
+            process_ack(header);
             continue;
         }
         
         // Push packet into packets(Cache) if it's not corrupted, else send NAK
-        bool is_good= (hash == calc_hash(recv_buffer))? true : false; // Calc hash only to data, without header
-        replay_ack(nickname, seq_num, is_good);
+        bool is_good= (hash == calc_hash(data))? true : false; // Calc hash only to data, without header
+        replay_ack(header, is_good);
 
-        if (is_good) packets.insert(stoi(seq_num), recv_buffer);
-
-        // Verify if flag = 1 (incomplete) else (complete)
-        
-        thread(process_functions[type[0]], ref(ss), connect_addr).detach();
+        if (is_good){
+            packets.insert(stoi(seq_num), recv_buffer);
+            copy(data.begin(), data.end(), back_inserter(incomplete_message[msg_id]));
+            
+            // Verify if flag = 1 (incomplete) else (complete)
+            if (flag == "0"){
+                vector<unsigned char> message = incomplete_message[msg_id];
+                incomplete_message.erase(msg_id);
+                thread(process_functions[type[0]], ref(ss), connect_addr).detach();
+            }
+        } 
     }
 }
 
@@ -116,24 +132,26 @@ void verify_storage(int n_storage){
     return;
 }
 
-void replay_ack(string nickname, string seq_num, bool one_ack){
-    return;
+void replay_ack(Header &header, bool one_ack){
+    send_message(header, "A", {});
+    if (!one_ack) // Two ACKs with the same seq_num = NAK
+        send_message(header, "A", {});
 }
 
-void process_ack(string seq_num){
-    if (acks_to_recv.find(seq_num) == acks_to_recv.end()){
+void process_ack(Header &header){
+    if (acks_to_recv.find(header.seq_num) == acks_to_recv.end()){
         // If it's not in acks_to_recv, it means that it's second ACK with the same seq_num = NAK
-        resend_packet(seq_num);
+        resend_packet(header);
     }
     else
-        acks_to_recv.erase(seq_num);
+        acks_to_recv.erase(header.seq_num);
 }
 
-void send_packet(vector<unsigned char> packet, string nickname){
+void send_message(Header &header, string type, vector<unsigned char> data){
     return;
 }
 
-void resend_packet(string nickname, string seq_num){
-    vector<unsigned char> packet = packets.get(stoi(seq_num));
-    send_packet(packet, nickname);
+void resend_packet(Header &header){
+    vector<unsigned char> packet = packets.get(stoi(header.seq_num));
+    sendto(primaryFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&connects_addr[header.nickname], sizeof(struct sockaddr));
 }
