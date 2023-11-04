@@ -1,8 +1,9 @@
 all:
-	g++ -o server server.cpp -lpthread
+	g++ -o primary primary.cpp -lpthread
+	g++ -o storage storage.cpp -lpthread
 	g++ -o client client.cpp -lpthread
 	clear
 	
 clean:
-	rm -f server client
+	rm -f primary storage client
 	clear

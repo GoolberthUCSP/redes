@@ -32,28 +32,24 @@
 using namespace std;
 
 int primaryFD;
-vector<int> storage_port= {5001, 5002, 5003, 5004};
+int seq_number = 0;
+int msg_id = 0;
 Cache packets(100);
 set<string> acks_to_recv;
-map<string, vector<unsigned char>> incomplete_message; // msg_id, data
+set<string> storage_nicknames= {"storage0", "storage1", "storage2", "storage3"};
 
 struct sockaddr_in primary_addr, connect_addr;
 map<string, struct sockaddr_in> connects_addr; // nickname, addr
 
-struct Header{
-    string nickname;
-    string seq_num;
-    Header(string n, string s) : nickname(n), seq_num(s) {}
-};
-
 void verify_storage(int n_storage);
 void send_message(Header &header, string type, vector<unsigned char> data);
 void resend_packet(Header &header);
-void replay_ack(Header &header, bool one_ack);
 void process_ack(Header &header);
 
-typedef void (*func_ptr)(stringstream&, struct sockaddr_in);
-map<char, func_ptr> process_functions({
+typedef void (*func_ptr)(Header &, vector<unsigned char>);
+map<char, func_ptr> to_storage_functions({
+});
+map<char, func_ptr> to_client_functions({ 
 });
 
 int main(){
@@ -112,30 +108,19 @@ int main(){
         
         // Push packet into packets(Cache) if it's not corrupted, else send NAK
         bool is_good= (hash == calc_hash(data))? true : false; // Calc hash only to data, without header
-        replay_ack(header, is_good);
-
-        if (is_good){
-            packets.insert(stoi(seq_num), recv_buffer);
-            copy(data.begin(), data.end(), back_inserter(incomplete_message[msg_id]));
-            
-            // Verify if flag = 1 (incomplete) else (complete)
-            if (flag == "0"){
-                vector<unsigned char> message = incomplete_message[msg_id];
-                incomplete_message.erase(msg_id);
-                thread(process_functions[type[0]], ref(ss), connect_addr).detach();
-            }
-        } 
+        send_message(header, "A", {});
+        if (!is_good) // If packet is corrupted send NAK= 2 ACKs
+            send_message(header, "A", {});
+        else
+            if (storage_nicknames.find(nickname) == storage_nicknames.end()) // If request is for storage
+                thread(to_storage_functions[type[0]], ref(header), recv_buffer).detach();
+            else // If request is for client
+                thread(to_client_functions[type[0]], ref(header), recv_buffer).detach();
     }
 }
 
 void verify_storage(int n_storage){
     return;
-}
-
-void replay_ack(Header &header, bool one_ack){
-    send_message(header, "A", {});
-    if (!one_ack) // Two ACKs with the same seq_num = NAK
-        send_message(header, "A", {});
 }
 
 void process_ack(Header &header){
@@ -148,6 +133,7 @@ void process_ack(Header &header){
 }
 
 void send_message(Header &header, string type, vector<unsigned char> data){
+    // packet: seq_num|hash|type|msg_id|flag|<data>
     return;
 }
 
