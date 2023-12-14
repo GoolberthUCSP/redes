@@ -45,8 +45,10 @@ int storageFD[4];
 int storage_port[4] = {5001, 5002, 5003, 5004};
 
 void keep_alive();
+void answer_query(struct sockaddr_in client, vector<unsigned char> buffer);
 
 int main(){
+    vector<unsigned char> recv_buffer(SIZE);
     string THIS_IP = "127.0.0.1";
     tv.tv_sec = SEC_TIMEOUT;
     tv.tv_usec = 0;
@@ -83,7 +85,34 @@ int main(){
 
     thread(keep_alive).detach();
     while(true){
+        memset(recv_buffer.data(), 0, SIZE);
+        int bytes_readed = recvfrom(clientFD, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&client_addr, (socklen_t *)sizeof(struct sockaddr_in));
+        if (bytes_readed == -1){
+            // Timeout ?????????????????
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
+            else
+                ERROR("recvfrom")
+        }
+        else{
+            // Received on time
+            thread(answer_query, client_addr, recv_buffer).detach();
+        }
     }
+}
+
+void answer_query(struct sockaddr_in client, vector<unsigned char> buffer){
+    // ss : seq_num|hash|type|msg_id|flag|nick_size|nickname|<data>
+    string seq_num(2, 0), hash(6, 0), type(1, 0), msg_id(3, 0), flag(1, 0), nick_size(2, 0);
+    stringstream ss;
+    ss.write((char *)buffer.data(), buffer.size());
+    ss.read(seq_num.data(), seq_num.size());
+    ss.read(hash.data(), hash.size());
+    ss.read(type.data(), type.size());
+    ss.read(msg_id.data(), msg_id.size());
+    ss.read(flag.data(), flag.size());
+    ss.read(nick_size.data(), nick_size.size());
+    // TODO: implement CRUD
 }
 
 void keep_alive(){
