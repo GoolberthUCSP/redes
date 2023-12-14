@@ -29,4 +29,16 @@ string calc_hash(string packet){
     return output.str();
 }
 
+/*
+    Format integer to string
+    @param num : number
+    @param size : size of string
+    @return string
+*/
+string format_int(int num, int size){
+    ostringstream output;
+    output << setw(size) << setfill('0') << num;
+    return output.str();
+}
+
 #endif

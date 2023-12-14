@@ -1,35 +1,5 @@
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <cstdio>
-#include <cstdlib>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-
-#include <iostream>
-#include <thread>
-#include <map>
-#include <string>
-#include <sstream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <utility>
-#include <algorithm>
-#include <thread>
-#include <set>
-#include <mutex>
-#include "lib/cache.h"
-#include "lib/storage.h"
-#include "lib/util.h"
-
-#define SIZE 1024
-#define SEC_TIMEOUT 3
-#define ERROR(s) {perror(s); exit(1);}
+#include "lib/macros.h"
+#include "lib/ack.h"
 
 using namespace std;
 
@@ -40,8 +10,7 @@ int seq_number = 0;
 int msg_id = 0;
 int storage_idx;
 
-Cache packets(100);
-set<string> acks_to_recv;
+ACK_controller ack_controller;
 map<string, set<string>> database; // database["node"]: {nodes that are connected to "node"}
 vector<int> storage_ports= {5001, 5002, 5003, 5004};
 
@@ -54,9 +23,7 @@ void delete_request(vector<unsigned char> data);
 void processing(vector<unsigned char> buffer);
 void send_message(string type, string data);
 void send_packet(string type, string data, string flag); // flag (0=last packet, 1=not last packet)
-void resend_packet(string seq_num);
-void process_ack(string seq_num);
-void replay_ack(string seq_num);
+
 void keep_alive();
 string get_relations(string node);
 
@@ -75,6 +42,7 @@ int main(int argc, char *argv[]){
     }
     storage_idx = atoi(argv[1])%4;
     int port = storage_ports[storage_idx];
+    ack_controller = ACK_controller(to_string(storage_idx), mainFD, main_addr);
 
     int bytes_readed;
     vector<unsigned char> recv_buffer(SIZE);
@@ -122,27 +90,27 @@ void processing(vector<unsigned char> buffer){
     ss.read(nick_size.data(), nick_size.size());
     string nickname(stoi(nick_size), 0);
     ss.read(nickname.data(), nickname.size());
-
+    // Reading data
     vector<unsigned char> data(buffer.size() - ss.tellg());
     ss.read((char *)data.data(), data.size());
     
+    // If packet is ACK
     if (type == "A"){
-        process_ack(seq_num);
+        ack_controller.process_ack(seq_num);
         return;
     }
     
 // If packet is not corrupted send one ACK, else send one more ACK 
     // Calc hash only to data, without header
     bool is_good= (hash == calc_hash(data))? true : false; 
-    replay_ack(seq_num);
+    ack_controller.replay_ack(seq_num);
     // If packet is corrupted, send second ACK
     if (!is_good) 
-        replay_ack(seq_num);
+        ack_controller.replay_ack(seq_num);
     // If packet is good, process it
     else
         thread(crud_requests[type[0]], data).detach();
 }
-
 
 void send_message(string type, string data){
     int packet_data_size = SIZE - 16; // seq_num=2|hash=6|type=1|msg_id=3|flag=1|nick_size=2|nickname=storage_idx=1
@@ -161,7 +129,7 @@ void send_message(string type, string data){
     fragment.resize(remaining_size);
     ss.read(fragment.data(), remaining_size);
     send_packet(type, fragment, "0");
-    msg_id++;
+    msg_id = (msg_id + 1) % 1000; // Increment message id
 }
 
 void send_packet(string type, string data, string flag){
@@ -175,28 +143,8 @@ void send_packet(string type, string data, string flag){
     copy(header.begin(), header.end(), packet.begin());
     copy(data.begin(), data.end(), packet.begin() + 16);
     sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
+    seq_number = (seq_number + 1) % 100; // Increment sequence number
 }
-
-void resend_packet(string seq_num){
-    vector<unsigned char> packet = packets.get(stoi(seq_num));
-    sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
-}
-
-void process_ack(string seq_num){
-    if (acks_to_recv.find(seq_num) == acks_to_recv.end())
-        resend_packet(seq_num);
-    else
-        acks_to_recv.erase(seq_num);
-}
-
-void replay_ack(string seq_num){
-    vector<unsigned char> packet(SIZE);
-    memset(packet.data(), '-', SIZE);
-    string header = seq_num + "000000" + "A" + "000" + "0" + "1" + to_string(storage_idx);
-    copy(header.begin(), header.end(), packet.begin());
-    sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
-}
-
 
 // CRUD functions
 void create_request(vector<unsigned char> data){
