@@ -1,9 +1,7 @@
-// Redes y Comunicación
-// Socket UDP Storage Server
-
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <cstdio>
@@ -20,28 +18,32 @@
 #include <iomanip>
 #include <vector>
 #include <random>
+#include <utility>
 #include <algorithm>
+#include <thread>
 #include <set>
-#include "cache.h"
-#include "lib.h"
-
+#include <mutex>
+#include "lib/cache.h"
+#include "lib/storage.h"
+#include "lib/util.h"
 
 #define SIZE 1024
+#define SEC_TIMEOUT 3
+#define ERROR(s) {perror(s); exit(1);}
 
 using namespace std;
 
-int socketFD;
-struct sockaddr_in primary_addr, this_addr;
-string nickname;
+int mainFD, keep_aliveFD;
+struct sockaddr_in main_addr, keep_alive_addr;
+string MAIN_IP = "127.0.0.1";
 int seq_number = 0;
 int msg_id = 0;
+int storage_idx;
 
 Cache packets(100);
 set<string> acks_to_recv;
-map<string, set<string>> database; // database[node]: {nodes that are connected to node}
+map<string, set<string>> database; // database["node"]: {nodes that are connected to "node"}
 vector<int> storage_ports= {5001, 5002, 5003, 5004};
-vector<string> storage_nicknames= {"storage0", "storage1", "storage2", "storage3"};
-string nick_size = "08";
 
 // CRUD request functions
 void create_request(vector<unsigned char> data);
@@ -51,10 +53,12 @@ void delete_request(vector<unsigned char> data);
 
 void processing(vector<unsigned char> buffer);
 void send_message(string type, string data);
+void send_packet(string type, string data, string flag); // flag (0=last packet, 1=not last packet)
 void resend_packet(string seq_num);
 void process_ack(string seq_num);
 void replay_ack(string seq_num);
-
+void keep_alive();
+string get_relations(string node);
 
 typedef void (*func_ptr)(vector<unsigned char>);
 map<char, func_ptr> crud_requests({
@@ -69,46 +73,36 @@ int main(int argc, char *argv[]){
         cout << "Bad number of arguments" << endl;
         return 1;
     }
-    int port = storage_ports[atoi(argv[1])%4];
-    nickname = storage_nicknames[atoi(argv[1])%4];
+    storage_idx = atoi(argv[1])%4;
+    int port = storage_ports[storage_idx];
 
     int bytes_readed;
     vector<unsigned char> recv_buffer(SIZE);
 
-    if ((socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+    if ((mainFD = socket(AF_INET, SOCK_DGRAM, 0)) == -1){
         perror("Storage: socket");
         exit(1);
     }
-    // Define the primary server's address
-    memset(&primary_addr, 0, sizeof(primary_addr));
-    primary_addr.sin_family = AF_INET;
-    primary_addr.sin_port = htons(5000);
-    if (inet_pton(AF_INET, "127.0.0.1", &primary_addr.sin_addr) == -1){
-        perror("Storage: inet_pton");
-        exit(1);
-    }
-    // Define this server's address
-    memset(&this_addr, 0, sizeof(this_addr));
-    this_addr.sin_family = AF_INET;
-    this_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, "127.0.0.1", &this_addr.sin_addr) == -1){
-        perror("Storage: inet_pton");
-        exit(1);
-    }
-    // Bind this server's address to the socket
-    if (bind(socketFD, (struct sockaddr *)&this_addr, sizeof(struct sockaddr)) == -1){
-        perror("Storage: bind");
-        exit(1);
-    }
-    // Register in principal server
-    // sendto primary_addr : nickname
+    // Define the main server's address
+    memset(&main_addr, 0, sizeof(main_addr));
+    main_addr.sin_family = AF_INET;
+    main_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, MAIN_IP.c_str(), &main_addr.sin_addr) == -1) ERROR("inet_pton")
 
-	cout << "UDPServer Waiting for primary socket on port " << port << "..." << endl;
+    // Define the keep-alive server's address
+    memset(&keep_alive_addr, 0, sizeof(keep_alive_addr));
+    keep_alive_addr.sin_family = AF_INET;
+    keep_alive_addr.sin_port = htons(5005);
+    if (inet_pton(AF_INET, MAIN_IP.c_str(), &keep_alive_addr.sin_addr) == -1) ERROR("inet_pton")
+
+    thread(keep_alive).detach();
+
+	cout << "UDPServer connected to main server on port " << port << "..." << endl;
     
     while(true){
         memset(recv_buffer.data(), 0, SIZE);
-        bytes_readed = recvfrom(socketFD, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&primary_addr, (socklen_t *)sizeof(struct sockaddr_in));
-        cout << "Received " << bytes_readed << "B from " << inet_ntoa(primary_addr.sin_addr) << ":" << ntohs(primary_addr.sin_port) << endl;
+        bytes_readed = recvfrom(mainFD, recv_buffer.data(), SIZE, MSG_WAITALL, (struct sockaddr *)&main_addr, (socklen_t *)sizeof(struct sockaddr_in));
+        cout << "Received " << bytes_readed << " bytes" << endl;
         thread(processing, recv_buffer).detach();
     }
 }
@@ -117,13 +111,14 @@ int main(int argc, char *argv[]){
 void processing(vector<unsigned char> buffer){
     stringstream ss;
     ss.write((char *)buffer.data(), buffer.size());
-    // ss : seq_num|hash|type|msg_id|flag|nick_size|nicknake|<data>
+    // ss : seq_num|hash|type|msg_id|flag|nick_size|nickname|<data>
     string seq_num(2, 0), hash(6, 0), type(1, 0), msg_id(3, 0), flag(1, 0), nick_size(2, 0);
     ss.read(seq_num.data(), seq_num.size());
     ss.read(hash.data(), hash.size());
     ss.read(type.data(), type.size());
     ss.read(msg_id.data(), msg_id.size());
     ss.read(flag.data(), flag.size());
+
     ss.read(nick_size.data(), nick_size.size());
     string nickname(stoi(nick_size), 0);
     ss.read(nickname.data(), nickname.size());
@@ -136,22 +131,55 @@ void processing(vector<unsigned char> buffer){
         return;
     }
     
-    // Push packet into packets(Cache) if it's not corrupted, else send NAK
-    bool is_good= (hash == calc_hash(data))? true : false; // Calc hash only to data, without header
+// If packet is not corrupted send one ACK, else send one more ACK 
+    // Calc hash only to data, without header
+    bool is_good= (hash == calc_hash(data))? true : false; 
     replay_ack(seq_num);
+    // If packet is corrupted, send second ACK
     if (!is_good) 
         replay_ack(seq_num);
+    // If packet is good, process it
     else
         thread(crud_requests[type[0]], data).detach();
 }
 
 
 void send_message(string type, string data){
-    return;
+    int packet_data_size = SIZE - 16; // seq_num=2|hash=6|type=1|msg_id=3|flag=1|nick_size=2|nickname=storage_idx=1
+    int remaining_size = data.size();
+    stringstream ss;
+    ss.write((char *)data.data(), data.size());
+    string fragment(packet_data_size, 0);
+    // Send message in fragmented packets if it's too big
+    while (remaining_size > packet_data_size){
+        // Send full packets
+        ss.read(fragment.data(), packet_data_size);
+        remaining_size -= packet_data_size;
+        send_packet(type, fragment, "1");
+    }
+    // Send last packet
+    fragment.resize(remaining_size);
+    ss.read(fragment.data(), remaining_size);
+    send_packet(type, fragment, "0");
+    msg_id++;
+}
+
+void send_packet(string type, string data, string flag){
+    // seq_num=2|hash=6|type=1|msg_id=3|flag=1|nick_size=2|nickname=storage_idx=1
+    ostringstream seq_num_os, msg_id_os;
+    seq_num_os << setfill('0') << setw(2) << seq_number;
+    msg_id_os << setfill('0') << setw(3) << msg_id;
+    string header = seq_num_os.str() + calc_hash(data) + type + msg_id_os.str() + flag + "01" + to_string(storage_idx);
+    
+    vector<unsigned char> packet(SIZE, '-');
+    copy(header.begin(), header.end(), packet.begin());
+    copy(data.begin(), data.end(), packet.begin() + 16);
+    sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
 }
 
 void resend_packet(string seq_num){
-    return;
+    vector<unsigned char> packet = packets.get(stoi(seq_num));
+    sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
 }
 
 void process_ack(string seq_num){
@@ -164,9 +192,9 @@ void process_ack(string seq_num){
 void replay_ack(string seq_num){
     vector<unsigned char> packet(SIZE);
     memset(packet.data(), '-', SIZE);
-    string header = seq_num + "000000" + "A" + "000" + "0" + nick_size + nickname;
+    string header = seq_num + "000000" + "A" + "000" + "0" + "1" + to_string(storage_idx);
     copy(header.begin(), header.end(), packet.begin());
-    sendto(socketFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&primary_addr, sizeof(struct sockaddr));
+    sendto(mainFD, packet.data(), packet.size(), MSG_CONFIRM, (struct sockaddr *)&main_addr, sizeof(struct sockaddr));
 }
 
 
@@ -176,14 +204,20 @@ void create_request(vector<unsigned char> data){
     stringstream ss;
     ss.write((char *)data.data(), data.size());
     string size1(2, 0), size2(2, 0);
+    // Reading node1
     ss.read(size1.data(), size1.size());
     string node1(stoi(size1), 0);
     ss.read(node1.data(), node1.size());
-
+    // Reading node2
     ss.read(size2.data(), size2.size());
     string node2(stoi(size2), 0);
     ss.read(node2.data(), node2.size());
     
+    if (database[node1].find(node2) != database[node1].end()){
+        // Send notification of failure: relation(node1->node2) already exists
+        return;
+    }
+
     database[node1].insert(node2);
     //Send notification of success
 }
@@ -192,6 +226,7 @@ void read_request(vector<unsigned char> data){
     stringstream ss;
     ss.write((char *)data.data(), data.size());
     string size(2, 0);
+    // Reading node
     ss.read(size.data(), size.size());
     string node(stoi(size), 0);
     ss.read(node.data(), node.size());
@@ -201,6 +236,11 @@ void read_request(vector<unsigned char> data){
         return;
     }
     //Return response to primary server
+    string result = get_relations(node);
+    ostringstream size_os;
+    size_os << setw(3) << setfill('0') << result.size();
+    result = size_os.str() + result;
+    send_message("R", result);
 }
 
 void update_request(vector<unsigned char> data){
@@ -208,20 +248,21 @@ void update_request(vector<unsigned char> data){
     stringstream ss;
     ss.write((char *)data.data(), data.size());
     string size1(2, 0), size2(2, 0), size3(2, 0);
+    // Reading node1
     ss.read(size1.data(), size1.size());
     string node1(stoi(size1), 0);
     ss.read(node1.data(), node1.size());
-
+    // Reading node2
     ss.read(size2.data(), size2.size());
     string node2(stoi(size2), 0);
     ss.read(node2.data(), node2.size());
-
+    // Reading new2
     ss.read(size3.data(), size3.size());
     string new2(stoi(size3), 0);
     ss.read(new2.data(), new2.size());
 
     if (database.find(node1) == database.end()){
-        // Send notification of failure: node doesn't exist
+        // Send notification of failure: node1 doesn't exist
         return;
     }
 
@@ -231,19 +272,53 @@ void update_request(vector<unsigned char> data){
 }
 
 void delete_request(vector<unsigned char> data){
-    // data : 00node
+    // data : 00node100node2
     stringstream ss;
     ss.write((char *)data.data(), data.size());
-    string size(2, 0);
-    ss.read(size.data(), size.size());
-    string node(stoi(size), 0);
-    ss.read(node.data(), node.size());
+    string size1(2, 0), size2(2, 0);
+    // Reading node1
+    ss.read(size1.data(), size1.size());
+    string node1(stoi(size1), 0);
+    ss.read(node1.data(), node1.size());
+    // Reading node2
+    ss.read(size2.data(), size2.size());
+    string node2(stoi(size2), 0);
+    ss.read(node2.data(), node2.size());
     
-    if (database.find(node) == database.end()){
-        // Send notification of failure: node doesn't exist
+    if (database.find(node1) == database.end()){
+        // Send notification of failure: node1 doesn't exist
         return;
     }
 
-    database.erase(node);
+    if (node2 == "*"){ // Delete all relations
+        database.erase(node1);
+    }
+    else { // Delete one relation only
+        database[node1].erase(node2);
+    }
     //Send notification of success
+}
+
+void keep_alive(){
+    int num;
+    string data;
+    data = to_string(storage_idx);
+    // Send first message to identify this storage in main server
+    sendto(keep_aliveFD, data.data(), data.size(), MSG_CONFIRM, (struct sockaddr *)&keep_alive_addr, sizeof(struct sockaddr));
+    while(true){
+        num = recvfrom(keep_aliveFD, data.data(), data.size(), MSG_WAITALL, (struct sockaddr *)&keep_alive_addr, (socklen_t *)sizeof(keep_alive_addr));
+        data = to_string(storage_idx);
+        sendto(keep_aliveFD, data.data(), data.size(), MSG_CONFIRM, (struct sockaddr *)&keep_alive_addr, sizeof(struct sockaddr));
+    }
+}
+
+string get_relations(string node){
+    // Return all relations in format: node1,node2,node3...
+    string relations;
+    set<string> &rel = database[node];
+    for (auto it : rel){
+        relations += it + ",";
+    }
+    relations = relations.substr(0, relations.size() - 1);
+    return relations;
 }
